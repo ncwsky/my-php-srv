@@ -1,0 +1,31 @@
+{
+    "name": "ncwsky/my-php-srv",
+    "type": "library",
+    "keywords": [
+        "swoole",
+        "workerman"
+    ],
+    "homepage": "https://github.com/ncwsky/MyPhpSrv",
+    "license": "MIT",
+    "description": "swoole/workerman集成服务",
+    "authors": [
+        {
+            "name": "路人",
+            "email": "ep1086@qq.com",
+            "homepage": "https://github.com/ncwsky/MyPhpSrv",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": ">=5.4",
+		"ncwsky/myphp": "~1.0"
+        "workerman/workerman": "^4.0"
+    },
+    "suggest": {
+        "ext-event": "For better performance. "
+    },
+    "autoload": {
+        "files":["Load.php"]
+    },
+    "minimum-stability": "dev"
+}
