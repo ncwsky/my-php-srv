@@ -1,5 +1,5 @@
 {
-    "name": "ncwsky/my-php-srv",
+    "name": "myphps/my-php-srv",
     "type": "library",
     "keywords": [
         "swoole",
