@@ -1,6 +1,6 @@
 ##使用
 ```
-composer require ncwsky/my-php-srv
+composer require myphps/my-php-srv
 ```
 
 ##示例代码
