@@ -3,6 +3,7 @@ vendor
 /Workerman
 srv_demo/log
 srv_demo/runtime
+srv_demo/composer*
 *.log
 *.pid
 .idea
