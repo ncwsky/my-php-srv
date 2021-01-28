@@ -1,1 +1,6 @@
-Workerman
+/Workerman
+/log
+*.log
+*.pid
+.idea
+/runtime
