@@ -25,7 +25,7 @@
         "ext-event": "For better performance. "
     },
     "autoload": {
-        "files":["./src/Load.php"]
+        "files":["./Load.php"]
     },
     "minimum-stability": "dev"
 }
