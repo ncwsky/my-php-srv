@@ -13,7 +13,6 @@ class IndexAct extends Base{
         }
 		
         $headers = myphp::env('headers', getallheaders());
-        $url = 'http://'.$domain.'.tun.guanliyuangong.com'.$url;
         $header = $headers['cookie']??'';
 
 		$timeout = Q('get.timeout%d{1,60}', 35);

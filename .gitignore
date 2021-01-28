@@ -6,3 +6,4 @@ srv_demo/runtime
 *.log
 *.pid
 .idea
+runLock
