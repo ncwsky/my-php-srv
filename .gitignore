@@ -1,6 +1,6 @@
 /Workerman
-demo/log
-demo/runtime
+srv_demo/log
+srv_demo/runtime
 *.log
 *.pid
 .idea
