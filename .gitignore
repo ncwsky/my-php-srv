@@ -1,3 +1,4 @@
+vendor
 /Workerman
 srv_demo/log
 srv_demo/runtime
