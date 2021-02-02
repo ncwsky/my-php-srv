@@ -54,7 +54,10 @@ class WorkerManSrv extends SrvBase {
         $this->server->worker_id = $worker_id;
         $this->initMyPhp();
         #Worker::safeEcho("init myphp:".$worker_id.PHP_EOL);
-        if($worker_id==0 && self::$isConsole) Log::write($_SERVER, 'server');
+        if($worker_id==0){
+            Worker::safeEcho("run dir:".$this->runDir.PHP_EOL);
+            self::$isConsole && Log::write($_SERVER, 'server');
+        }
         myphp::Run(function($code, $data, $header) use($worker_id){
             #echo "init myphp:".$worker_id, PHP_EOL;
         }, false);
@@ -307,8 +310,7 @@ class WorkerManSrv extends SrvBase {
 
         $worker_id = $worker->id;
         $this->initMyPhp();
-        Worker::safeEcho("init myphp:".$worker_id.PHP_EOL);
-        self::$isConsole && Log::write($_SERVER, 'server');
+        #Worker::safeEcho("childWorker init myphp:".$worker_id.PHP_EOL);
         myphp::Run(function($code, $data, $header) use($worker_id){
             #echo "init myphp:".$worker_id, PHP_EOL;
         }, false);

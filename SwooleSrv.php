@@ -27,6 +27,7 @@ class SwooleSrv extends SrvBase {
         echo $this->address,PHP_EOL;
         echo 'master pid:' . $server->master_pid . PHP_EOL;
         echo 'manager pid:' . $server->manager_pid . PHP_EOL;
+        echo 'run dir:'. $this->runDir . PHP_EOL;
 
         if(method_exists($this, 'onManagerStart')){
             $this->onManagerStart($server);
