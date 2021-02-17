@@ -192,30 +192,26 @@ class WorkerManSrv extends SrvBase {
                     foreach($item['setting'] as $name=>$val){
                         $childSrv->$name = $val;
                     }
-                    if($childSrv->name=='none'){
-                        $childSrv->name = $this->serverName().'_'.$k;
-                    }
-                    if($childSrv->user==''){
-                        $childSrv->user = $this->getConfig('setting.user', '');
-                    }
-
-                    //初始进程事件绑定
-                    $childSrv->onWorkerStart = [$this, 'childWorkerStart'];
-                    if(!$this->getConfig('setting.reloadable', true)) { //不自动重启进程的reload处理
-                        //如重置载入配置
-                        $childSrv->onWorkerReload = [$this, 'onWorkerReload'];
-                    }
-                    //当客户端的连接上发生错误时触发
-                    $childSrv->onError = [$this, 'onWorkerError'];
-                    #$childSrv->onConnect = ['WorkerManEvent', 'onConnect'];
-                    #$childSrv->onMessage = ['WorkerManEvent', 'onReceive'];
-                    #$childSrv->onClose= ['WorkerManEvent', 'onClose'];
-                    $childSrv->onBufferFull = ['WorkerManEvent', 'onBufferFull'];
-                    $childSrv->onBufferDrain = ['WorkerManEvent', 'onBufferDrain'];
-                    if(isset($item['event'])){ //有自定义事件
-                        foreach ($item['event'] as $event=>$fun){
-                            $childSrv->$event = $fun;
-                        }
+                }
+                if($childSrv->name=='none'){
+                    $childSrv->name = $this->serverName().'_'.$k;
+                }
+                if($childSrv->user==''){
+                    $childSrv->user = $this->getConfig('setting.user', '');
+                }
+                //初始进程事件绑定
+                $childSrv->onWorkerStart = [$this, 'childWorkerStart'];
+                if(!$this->getConfig('setting.reloadable', true)) { //不自动重启进程的reload处理
+                    //如重置载入配置
+                    $childSrv->onWorkerReload = [$this, 'onWorkerReload'];
+                }
+                //当客户端的连接上发生错误时触发
+                $childSrv->onError = [$this, 'onWorkerError'];
+                $childSrv->onBufferFull = ['WorkerManEvent', 'onBufferFull'];
+                $childSrv->onBufferDrain = ['WorkerManEvent', 'onBufferDrain'];
+                if(isset($item['event'])){ //有自定义事件
+                    foreach ($item['event'] as $event=>$fun){
+                        $childSrv->$event = $fun;
                     }
                 }
                 $childSrv->listen();
