@@ -146,7 +146,7 @@ class WorkerManSrv extends SrvBase {
         if(!empty($context['ssl'])){ // 设置transport开启ssl
             $server->transport = 'ssl';
         }
-
+        #protocol: 子服务不会继承主服务的协议方式
         //初始进程事件绑定
         $server->onWorkerStart = [$this, '_onWorkerStart'];
         if(!$this->getConfig('setting.reloadable', true)) { //不自动重启进程的reload处理
@@ -165,7 +165,6 @@ class WorkerManSrv extends SrvBase {
         //开启多个监听处理
         $listen = $this->getConfig('listen', []);
         if(is_array($listen) && $listen){
-            #未调用on方法，设置回调函数的监听端口，默认使用主服务器的回调函数
             $port = (int)$this->port;
             foreach ($listen as $k=>$item){
                 if(!isset($item['ip'])){ //未设置使用主服务器的
@@ -207,6 +206,7 @@ class WorkerManSrv extends SrvBase {
                 }
                 //当客户端的连接上发生错误时触发
                 $childSrv->onError = [$this, 'onWorkerError'];
+                #未设置【onConnect,onMessage,onClose】回调函数，默认使用主服务器的回调函数
                 $childSrv->onBufferFull = ['WorkerManEvent', 'onBufferFull'];
                 $childSrv->onBufferDrain = ['WorkerManEvent', 'onBufferDrain'];
                 if(isset($item['event'])){ //有自定义事件
