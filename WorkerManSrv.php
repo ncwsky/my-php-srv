@@ -58,7 +58,7 @@ class WorkerManSrv extends SrvBase {
             Worker::safeEcho("run dir:".$this->runDir.PHP_EOL);
             self::$isConsole && Log::write($_SERVER, 'server');
         }
-        myphp::Run(function($code, $data, $header) use($worker_id){
+        myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
             #echo "init myphp:".$worker_id, PHP_EOL;
         }, false);
         if($this->getConfig('timer_file')){
@@ -211,9 +211,17 @@ class WorkerManSrv extends SrvBase {
                 $childSrv->onBufferDrain = ['WorkerManEvent', 'onBufferDrain'];
                 if(isset($item['event'])){ //有自定义事件
                     foreach ($item['event'] as $event=>$fun){
-                        $childSrv->$event = $fun;
+                        if($event=='onWorkerStart') {
+                            $childSrv->onWorkerStart = function (Worker $worker) use($fun){
+                                $this->childWorkerStart($worker);
+                                call_user_func($fun, $worker);
+                            };
+                        }else{
+                            $childSrv->$event = $fun;
+                        }
                     }
                 }
+
                 $childSrv->listen();
                 $this->address .= '; '.$item['type'].'://'.$item['ip'].':'.$item['port'];
             }
@@ -307,7 +315,7 @@ class WorkerManSrv extends SrvBase {
         $worker_id = $worker->id;
         $this->initMyPhp();
         #Worker::safeEcho("childWorker init myphp:".$worker_id.PHP_EOL);
-        myphp::Run(function($code, $data, $header) use($worker_id){
+        myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
             #echo "init myphp:".$worker_id, PHP_EOL;
         }, false);
     }
