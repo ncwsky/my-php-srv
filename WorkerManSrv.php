@@ -214,7 +214,7 @@ class WorkerManSrv extends SrvBase {
                         if($event=='onWorkerStart') {
                             $childSrv->onWorkerStart = function (Worker $worker) use($fun){
                                 $this->childWorkerStart($worker);
-                                call_user_func($fun, $worker);
+                                call_user_func($fun, $worker, $worker->id);
                             };
                         }else{
                             $childSrv->$event = $fun;
