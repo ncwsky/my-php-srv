@@ -78,16 +78,13 @@ class SwooleSrv extends SrvBase {
         $this->onWorkerStart($server, $worker_id);
     }
     //此事件在Worker进程终止时发生 在此函数中可以回收Worker进程申请的各类资源
-    public function _onWorkerStop(swoole_server $server, int $worker_id){
+    final public function _onWorkerStop(swoole_server $server, int $worker_id){
         if (!$server->taskworker) { //worker进程  异常结束后执行的逻辑
             echo 'Worker Stop clear' . PHP_EOL;
             $timer = new SwooleTimer();
             $timer->stop($worker_id);
         }
         $this->onWorkerStop($server, $worker_id);
-    }
-    protected function onWorkerStop(swoole_server $server, int $worker_id){
-        //todo
     }
     //仅在开启reload_async特性后有效。异步重启特性，会先创建新的Worker进程处理新请求，旧的Worker进程自行退出。
     //https://wiki.swoole.com/wiki/page/808.html
@@ -107,14 +104,13 @@ class SwooleSrv extends SrvBase {
      * @param int $exit_code 退出的状态码，范围是 0～255
      * @param int $signal 进程退出的信号
      */
-    public function _onWorkerError(swoole_server $server, int $worker_id, int $worker_pid, int $exit_code, int $signal){
+    final public function _onWorkerError(swoole_server $server, int $worker_id, int $worker_pid, int $exit_code, int $signal){
         $err = '异常进程的编号:'.$worker_id.', 异常进程的ID:'.$worker_pid.', 退出的状态码:'.$exit_code.', 进程退出信号:'.$signal;
         echo $err,PHP_EOL;
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
         self::err($err);
-        $this->onWorkerError($server, $worker_id, $worker_pid, $exit_code, $signal);
+        $this->onWorkerError($server, $worker_id, $err);
     }
-    protected function onWorkerError(swoole_server $server, int $worker_id, int $worker_pid, int $exit_code, int $signal){}
     //初始服务
     final public function init(){
         $this->config['setting']['daemonize'] = self::$isConsole ? 0 : 1; //守护进程化;

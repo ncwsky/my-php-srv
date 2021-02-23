@@ -5,7 +5,11 @@ use Workerman\Connection\TcpConnection;
 //增加定时处理的tick、after方法
 class Worker2 extends Worker{
     public $port = '';
+    public $type = 'tcp';
     public $worker_id = 0;
+    public $isTask = false; #是否task进程
+    public $channles = []; #记录worker用于通信
+    public $onTask = null; #task进程回调
     /** 自定义间隔时钟
      * @param int $msec 毫秒
      * @param callable $callback
@@ -45,11 +49,11 @@ class WorkerManSrv extends SrvBase {
         $this->runLock = $this->runDir.'/runLock';
     }
     /** 此事件在Worker进程启动时发生 这里创建的对象可以在进程生命周期内使用 如mysql/redis...
-     * @param Worker $worker
+     * @param Worker2 $worker
      #* @param int $worker_id [0-$worker_num)区间内的数字
      * @return bool
      */
-    final public function _onWorkerStart(Worker $worker){
+    final public function _onWorkerStart(Worker2 $worker){
         $worker_id = $worker->id;
         $this->server->worker_id = $worker_id;
         $this->initMyPhp();
@@ -78,18 +82,27 @@ class WorkerManSrv extends SrvBase {
 
         $this->onWorkerStart($worker, $worker_id);
     }
+    //此事件在Worker进程终止时发生 在此函数中可以回收Worker进程申请的各类资源
+    final public function _onWorkerStop(Worker2 $worker){
+        $worker_id = $worker->id;
+        if (!$worker->isTask) { //worker进程  异常结束后执行的逻辑
+            echo 'Worker Stop clear' . PHP_EOL;
+            $timer = new WorkerManTimer();
+            $timer->stop($worker_id);
+        }
+        $this->onWorkerStop($worker, $worker_id);
+    }
     //当客户端的连接上发生错误时触发 参见 http://doc.workerman.net/worker/on-error.html
-    public function _onWorkerError(TcpConnection $connection, $code, $msg){
+    final public function _onWorkerError(TcpConnection $connection, $code, $msg){
         $err = '异常进程的ID:'.$connection->worker->id.', 异常连接的ID:'.$connection->id.', code:'.$code.', msg:'.$msg;
         Worker::safeEcho($err.PHP_EOL);
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
         self::err($err);
-        $this->onWorkerError($connection, $code, $msg);
+        $this->onWorkerError(self::$instance->server, $connection->worker->id, $err);
     }
-    public function onWorkerError(TcpConnection $connection, $code, $msg){}
 
     //reloadable为false时 可以此重载回调重新载入配置等操作
-    public function onWorkerReload(Worker $worker){
+    public function onWorkerReload(Worker2 $worker){
         //todo
     }
     //初始服务
@@ -117,21 +130,21 @@ class WorkerManSrv extends SrvBase {
         switch ($this->getConfig('type')){
             case self::TYPE_HTTP:
                 $this->server = new Worker2(self::TYPE_HTTP.'://'.$this->ip.':'.$this->port, $context);
-                $this->address = self::TYPE_HTTP;
+                $this->server->type = self::TYPE_HTTP;
                 break;
             case self::TYPE_WEB_SOCKET:
                 $this->server = new Worker2( self::TYPE_WEB_SOCKET.'://'.$this->ip.':'.$this->port, $context);
-                $this->address = self::TYPE_WEB_SOCKET;
+                $this->server->type = self::TYPE_WEB_SOCKET;
                 break;
             case self::TYPE_UDP:
                 $this->server = new Worker2(self::TYPE_UDP.'://'.$this->ip.':'.$this->port, $context);
-                $this->address = self::TYPE_UDP;
+                $this->server->type = self::TYPE_UDP;
                 break;
             default:
                 $this->server = new Worker2(self::TYPE_TCP.'://'.$this->ip.':'.$this->port, $context);
-                $this->address = self::TYPE_TCP;
+                $this->server->type = self::TYPE_TCP;
         }
-        $this->address .= '://'.$this->ip.':'.$this->port;
+        $this->address = $this->server->type.'://'.$this->ip.':'.$this->port;
 
         $server = $this->server;
         $server->ip = $this->ip;
@@ -153,8 +166,9 @@ class WorkerManSrv extends SrvBase {
             //如重置载入配置
             $server->onWorkerReload = [$this, 'onWorkerReload'];
         }
+        $server->onWorkerStop = [$this, '_onWorkerStop'];
         //当客户端的连接上发生错误时触发
-        $server->onError = [$this, 'onWorkerError'];
+        $server->onError = [$this, '_onWorkerError'];
         //绑定事件
         $server->onConnect= ['WorkerManEvent', 'onConnect'];
         $server->onMessage = ['WorkerManEvent', 'onReceive'];
@@ -173,14 +187,15 @@ class WorkerManSrv extends SrvBase {
                 if(!isset($item['port'])){ //未设置使用主服务器的 port+10
                     $item['port'] = ++$port;
                 }
-                if(!isset($item['type'])) $item['type'] = self::TYPE_TCP; // Socket 类型
+                if(!isset($item['type']) || !in_array($item['type'], SrvBase::$types)) $item['type'] = self::TYPE_TCP; // Socket 类型
 
                 //创建其他监听服务
-                $this->childSrv[$k] = new Worker($item['type'] . '://' . $item['ip'] . ':' . $item['port'], empty($item['context']) ? [] : $item['context']);
+                $this->childSrv[$k] = new Worker2($item['type'] . '://' . $item['ip'] . ':' . $item['port'], empty($item['context']) ? [] : $item['context']);
                 /**
-                 * @var Worker $childSrv;
+                 * @var Worker2 $childSrv;
                  */
                 $childSrv = $this->childSrv[$k];
+                $childSrv->type = $item['type'];
                 $childSrv->ip = $item['ip'];
                 $childSrv->port = $item['port'];
                 //有配置证书
@@ -205,15 +220,19 @@ class WorkerManSrv extends SrvBase {
                     $childSrv->onWorkerReload = [$this, 'onWorkerReload'];
                 }
                 //当客户端的连接上发生错误时触发
-                $childSrv->onError = [$this, 'onWorkerError'];
+                $childSrv->onError = [$this, '_onWorkerError'];
                 #未设置【onConnect,onMessage,onClose】回调函数，默认使用主服务器的回调函数
                 $childSrv->onBufferFull = ['WorkerManEvent', 'onBufferFull'];
                 $childSrv->onBufferDrain = ['WorkerManEvent', 'onBufferDrain'];
                 if(isset($item['event'])){ //有自定义事件
                     foreach ($item['event'] as $event=>$fun){
                         if($event=='onWorkerStart') {
-                            $childSrv->onWorkerStart = function (Worker $worker) use($fun){
+                            $childSrv->onWorkerStart = function (Worker2 $worker) use($fun){
                                 $this->childWorkerStart($worker);
+                                call_user_func($fun, $worker, $worker->id);
+                            };
+                        }elseif($event=='onWorkerStop'){
+                            $childSrv->onWorkerStop = function (Worker2 $worker) use($fun){
                                 call_user_func($fun, $worker, $worker->id);
                             };
                         }else{
@@ -236,9 +255,10 @@ class WorkerManSrv extends SrvBase {
             $taskPort = $this->getConfig('setting.task_port',  $this->port+100);
             self::$taskAddr = "127.0.0.1:".$taskPort;
             //创建异步任务进程
-            $taskWorker = new Worker('frame://'.self::$taskAddr);
+            $taskWorker = new Worker2('frame://'.self::$taskAddr);
             $taskWorker->ip = '127.0.0.1';
             $taskWorker->port = $taskPort;
+            $taskWorker->isTask = true;
             $taskWorker->user = $this->getConfig('setting.user', '');
             $taskWorker->name = $server->name.'_task';
             $taskWorker->count = $this->getConfig('setting.task_worker_num', 0); #unix://不支持多worker进程
@@ -249,7 +269,7 @@ class WorkerManSrv extends SrvBase {
                 $taskWorker->onWorkerReload = [$this, 'onWorkerReload'];
             }
             //当客户端的连接上发生错误时触发
-            $taskWorker->onError = [$this, 'onWorkerError'];
+            $taskWorker->onError = [$this, '_onWorkerError'];
             $taskWorker->onConnect = function(TcpConnection $connection) use ($taskWorker){
                 $connection->send($taskWorker->id); //返回进程id
             };
@@ -278,7 +298,7 @@ class WorkerManSrv extends SrvBase {
     }
     public static $remoteConnection = null;
     //连接到内部通信服务
-    protected function chainConnection($worker){
+    protected function chainConnection(Worker2 $worker){
         if(!$this->getConfig('setting.task_worker_num', 0)) return;
 
         //生成唯一id
@@ -309,7 +329,7 @@ class WorkerManSrv extends SrvBase {
         self::$remoteConnection->connect();
     }
     //
-    public function childWorkerStart(Worker $worker){
+    public function childWorkerStart(Worker2 $worker){
         $this->chainConnection($worker);
 
         $worker_id = $worker->id;
@@ -325,7 +345,7 @@ class WorkerManSrv extends SrvBase {
         file_exists($socketFile) && @unlink($socketFile);
 
         self::$chainSocketFile = $socketFile;
-        $chainWorker = new Worker('unix://'.$socketFile);
+        $chainWorker = new Worker2('unix://'.$socketFile);
         $chainWorker->user = $this->getConfig('setting.user', '');
         $chainWorker->name = $this->serverName().'_chain';
         $chainWorker->protocol = '\Workerman\Protocols\Frame';
@@ -365,7 +385,7 @@ class WorkerManSrv extends SrvBase {
         self::$chainWorker = $chainWorker;
     }
     //通道通信
-    public static function chainTo(Worker $worker, $fd, $data){
+    public static function chainTo(Worker2 $worker, $fd, $data){
         $data = ['a'=>$fd===-1?'all':'to','fd'=>$fd, 'raw'=>$data];
         echo PHP_EOL, 'workerId:'.$worker->id.', name:'.$worker->name.', port:'.$worker->port.', chain:'.( self::$remoteConnection ? 'has':'no'),PHP_EOL, PHP_EOL;
         self::$remoteConnection->send(serialize($data)); //内部通信-消息转发

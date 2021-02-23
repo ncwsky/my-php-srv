@@ -1,14 +1,13 @@
 <?php
-use Workerman\Connection\TcpConnection;
-use Workerman\Worker;
+use Workerman\Connection\ConnectionInterface;
 class WorkerManEvent{
     public static $onlyHttp = false;
     //有新的连接进入时， $fd 是连接的文件描述符
-    public static function onConnect(TcpConnection $connection){
+    public static function onConnect(ConnectionInterface $connection){
         $fd = $connection->id;
     }
     //接收到数据时回调此函数
-    public static function onReceive(TcpConnection $connection, $data){
+    public static function onReceive(ConnectionInterface $connection, $data){
         /*if(SrvBase::$instance->getConfig('max_request',0)>0){
             static $request_count;
             // 业务处理略
@@ -20,8 +19,7 @@ class WorkerManEvent{
 
         //如果有http请求需要判断处理
         #$port = $connection->getLocalPort();
-        #var_dump($port);
-        if(self::$onlyHttp || (isset($_SERVER['SERVER_PORT']) && SrvBase::$instance->getConfig('type')==SrvBase::TYPE_HTTP && SrvBase::$instance->port==$_SERVER['SERVER_PORT'])){
+        if(self::$onlyHttp || (isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)){
             //重置
             myphp::setEnv('headers', $data->header());
             $_COOKIE = $data->cookie();
@@ -80,21 +78,23 @@ class WorkerManEvent{
 
     }
     //客户端连接关闭事件
-    public static function onClose(TcpConnection $connection){
-
+    public static function onClose(ConnectionInterface $connection){
+        if((isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)) return true;
+        //todo
+        return true;
     }
     //当连接的应用层发送缓冲区满时触发
-    public static function onBufferFull(TcpConnection $connection){
+    public static function onBufferFull(ConnectionInterface $connection){
         //echo "bufferFull and do not send again\n";
         $connection->pauseRecv(); //暂停接收
     }
     //当连接的应用层发送缓冲区数据全部发送完毕时触发
-    public static function onBufferDrain(TcpConnection $connection){
+    public static function onBufferDrain(ConnectionInterface $connection){
         //echo "buffer drain and continue send\n";
         $connection->resumeRecv(); //恢复接收
     }
     //异步任务 在task_worker进程内被调用
-    public static function onTask(int $task_id, int $src_worker_id, $data){
+    public static function onTask($task_id, $src_worker_id, $data){
         //重置
         $_SERVER = $data['_SERVER'];
         $_REQUEST = $data['_REQUEST'];

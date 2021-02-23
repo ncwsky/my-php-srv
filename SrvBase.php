@@ -28,6 +28,12 @@ abstract class SrvBase{
     const TYPE_TCP = 'tcp';
     const TYPE_UDP = 'udp';
     const TYPE_WEB_SOCKET = 'websocket';
+    public static $types = [
+        self::TYPE_HTTP,
+        self::TYPE_TCP,
+        self::TYPE_UDP,
+        self::TYPE_WEB_SOCKET
+    ];
     /**
      * SrvBase constructor.
      * @param array $config
@@ -79,6 +85,13 @@ abstract class SrvBase{
         if($worker_id==0){ //
             //todo 清理上次服务的全局缓存数据 reload时也会被处理
         }
+    }
+    protected function onWorkerStop($server, $worker_id){
+        //todo
+    }
+    protected function onWorkerError($server, $worker_id, $err){
+        //todo
+        #Log::write($err, 'err');
     }
 
     /** 返回当前进程的id
