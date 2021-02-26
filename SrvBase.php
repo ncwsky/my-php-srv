@@ -11,8 +11,12 @@ defined('SIGRTMIN') || define('SIGRTMIN', 34); //SIGRTMIN信号重新打开日�
 abstract class SrvBase{
     use SrvMsg;
     //全局变量存放 仅当前的工作进程有效[参见进程隔离]
+    public static $isHttp = false;
     public $isWorkerMan = false;
 	public static $isConsole = false;
+    /**
+     * @var Worker2|swoole_server $server
+     */
     public $server; //服务实例
     public $childSrv = []; //多个监听时的子服务
     protected $config;

@@ -43,6 +43,7 @@ class SwooleEvent{
     }
 
     public static function onRequest(swoole_http_request $request, swoole_http_response $response){
+        SrvBase::$isHttp = true;
         $_SERVER = array_change_key_case($request->server,CASE_UPPER);
         //客户端的真实IP
         if(isset($request->header['x-real-ip'])) {

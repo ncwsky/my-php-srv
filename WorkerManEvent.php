@@ -20,6 +20,7 @@ class WorkerManEvent{
         //如果有http请求需要判断处理
         #$port = $connection->getLocalPort();
         if(self::$onlyHttp || (isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)){
+            SrvBase::$isHttp = true;
             //重置
             myphp::setEnv('headers', $data->header());
             $_COOKIE = $data->cookie();
