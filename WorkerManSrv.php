@@ -28,6 +28,21 @@ class Worker2 extends Worker{
     public function after($msec, $callback, $args=[]){
         return Timer::add(round($msec/1000,3), $callback, $args, false);
     }
+
+    /**清除定时器
+     * @param $timer_id
+     * @return bool
+     */
+    public function clear($timer_id){
+        return Timer::del($timer_id);
+    }
+
+    /**
+     * 清除所有定时器
+     */
+    public function clearAll(){
+        Timer::delAll();
+    }
 }
 
 class WorkerManSrv extends SrvBase {
