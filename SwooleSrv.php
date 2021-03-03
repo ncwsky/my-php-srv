@@ -162,6 +162,7 @@ class SwooleSrv extends SrvBase {
                     $item['port'] = ++$port;
                 }
                 if(!isset($item['type'])) $item['type'] = SWOOLE_SOCK_TCP; // Socket 类型
+                if (is_string($item['type'])) $item['type'] = $item['type'] == self::TYPE_UDP ? SWOOLE_SOCK_UDP : SWOOLE_SOCK_TCP;
                 //有配置证书
                 if(isset($item['setting']['ssl_cert_file'])){
                     $item['type'] =  $item['type'] | SWOOLE_SSL;
@@ -173,7 +174,7 @@ class SwooleSrv extends SrvBase {
                 }
                 if(isset($item['event'])){ //有自定义事件
                     foreach ($item['event'] as $event=>$fun){
-                        $this->childSrv->on($event, $fun);
+                        $this->childSrv[$k]->on($event, $fun);
                     }
                 }
                 $this->address .= '; '.$getTypeName($item['type']).'://'.$item['ip'].':'.$item['port'];
