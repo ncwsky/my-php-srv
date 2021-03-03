@@ -1,7 +1,7 @@
 <?php
 use Workerman\Worker;
 use Workerman\Lib\Timer;
-use Workerman\Connection\TcpConnection;
+use Workerman\Connection\ConnectionInterface;
 //增加定时处理的tick、after方法
 class Worker2 extends Worker{
     public $port = '';
@@ -108,7 +108,7 @@ class WorkerManSrv extends SrvBase {
         $this->onWorkerStop($worker, $worker_id);
     }
     //当客户端的连接上发生错误时触发 参见 http://doc.workerman.net/worker/on-error.html
-    final public function _onWorkerError(TcpConnection $connection, $code, $msg){
+    final public function _onWorkerError(ConnectionInterface $connection, $code, $msg){
         $err = '异常进程的ID:'.$connection->worker->id.', 异常连接的ID:'.$connection->id.', code:'.$code.', msg:'.$msg;
         Worker::safeEcho($err.PHP_EOL);
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
@@ -174,22 +174,68 @@ class WorkerManSrv extends SrvBase {
         if(!empty($context['ssl'])){ // 设置transport开启ssl
             $server->transport = 'ssl';
         }
+        // 获取配置的事件
+        $event = $this->getConfig('event', []);
+
         #protocol: 子服务不会继承主服务的协议方式
         //初始进程事件绑定
-        $server->onWorkerStart = [$this, '_onWorkerStart'];
-        if(!$this->getConfig('setting.reloadable', true)) { //不自动重启进程的reload处理
+        $server->onWorkerStart = function (Worker2 $worker) use ($event) {
+            $this->_onWorkerStart($worker);
+            isset($event['onWorkerStart']) && call_user_func($event['onWorkerStart'], $worker, $worker->id);
+        };
+
+        if (!$this->getConfig('setting.reloadable', true)) { //不自动重启进程的reload处理
             //如重置载入配置
-            $server->onWorkerReload = [$this, 'onWorkerReload'];
+            $server->onWorkerReload = function ($worker) use ($event) {
+                $this->onWorkerReload($worker);
+                isset($event['onWorkerReload']) && call_user_func($event['onWorkerReload'], $worker);
+            };
         }
-        $server->onWorkerStop = [$this, '_onWorkerStop'];
+        $server->onWorkerStop = function (Worker2 $worker) use ($event) {
+            $this->_onWorkerStop($worker);
+            isset($event['onWorkerStop']) && call_user_func($event['onWorkerStop'], $worker, $worker->id);
+        };
         //当客户端的连接上发生错误时触发
-        $server->onError = [$this, '_onWorkerError'];
+        $server->onError = function (ConnectionInterface $connection, $code, $msg) use ($event) {
+            $this->_onWorkerError($connection, $code, $msg);
+            isset($event['onWorkerError']) && call_user_func($event['onWorkerError'], self::$instance->server, $connection->worker->id, $msg);
+        };
         //绑定事件
-        $server->onConnect= ['WorkerManEvent', 'onConnect'];
-        $server->onMessage = ['WorkerManEvent', 'onReceive'];
-        $server->onClose= ['WorkerManEvent', 'onClose'];
-        $server->onBufferFull = ['WorkerManEvent', 'onBufferFull'];
-        $server->onBufferDrain = ['WorkerManEvent', 'onBufferDrain'];
+        $server->onConnect = function ($connection) use ($event) {
+            if (isset($event['onConnect'])) {
+                call_user_func($event['onConnect'], $connection);
+            } else {
+                WorkerManEvent::onConnect($connection);
+            }
+        };
+        $server->onMessage = function ($connection, $data) use ($event) {
+            if (isset($event['onMessage'])) {
+                call_user_func($event['onMessage'], $connection, $data);
+            } else {
+                WorkerManEvent::onMessage($connection, $data);
+            }
+        };
+        $server->onClose = function ($connection) use ($event) {
+            if (isset($event['onClose'])) {
+                call_user_func($event['onClose'], $connection);
+            } else {
+                WorkerManEvent::onClose($connection);
+            }
+        };
+        $server->onBufferFull = function ($connection) use ($event) {
+            if (isset($event['onBufferFull'])) {
+                call_user_func($event['onBufferFull'], $connection);
+            } else {
+                WorkerManEvent::onBufferFull($connection);
+            }
+        };
+        $server->onBufferDrain = function ($connection) use ($event) {
+            if (isset($event['onBufferDrain'])) {
+                call_user_func($event['onBufferDrain'], $connection);
+            } else {
+                WorkerManEvent::onBufferDrain($connection);
+            }
+        };
 
         //开启多个监听处理
         $listen = $this->getConfig('listen', []);
@@ -262,9 +308,13 @@ class WorkerManSrv extends SrvBase {
         }
         $server->onTask = null;
         if ($this->getConfig('setting.task_worker_num', 0) && !self::$taskWorker) { //启用了
-            $server->onTask = function ($task_id, $src_worker_id, $data){
+            $server->onTask = function ($task_id, $src_worker_id, $data) use ($event){
                 #echo 'taskId:',$task_id,'; src_workerId:',$src_worker_id,PHP_EOL;
-                return WorkerManEvent::OnTask($task_id, $src_worker_id, $data);
+                if (isset($event['onTask'])) {
+                    call_user_func($event['onTask'], $task_id, $src_worker_id, $data);
+                } else {
+                    WorkerManEvent::OnTask($task_id, $src_worker_id, $data);
+                }
             };
 
             $taskPort = $this->getConfig('setting.task_port',  $this->port+100);
@@ -285,7 +335,7 @@ class WorkerManSrv extends SrvBase {
             }
             //当客户端的连接上发生错误时触发
             $taskWorker->onError = [$this, '_onWorkerError'];
-            $taskWorker->onConnect = function(TcpConnection $connection) use ($taskWorker){
+            $taskWorker->onConnect = function(ConnectionInterface $connection) use ($taskWorker){
                 $connection->send($taskWorker->id); //返回进程id
             };
             $taskWorker->onMessage = function ($connection, $data) use ($taskWorker) {
@@ -467,7 +517,7 @@ class WorkerManSrv extends SrvBase {
     public function task($data){
         //创建异步任务连接
         #echo 'init task conn',PHP_EOL;
-        #$taskConn = new TcpConnection(stream_socket_client( "tcp://".self::$taskAddr));
+        #$taskConn = new \Workerman\Connection\TcpConnection(stream_socket_client( "tcp://".self::$taskAddr));
         #$taskConn->protocol = '\Workerman\Protocols\Frame';
        /* $taskConn = new \Workerman\Connection\AsyncTcpConnection('frame://'.self::$taskAddr);
         $taskConn->taskId = false;

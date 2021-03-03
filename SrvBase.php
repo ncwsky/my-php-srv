@@ -14,9 +14,6 @@ abstract class SrvBase{
     public static $isHttp = false;
     public $isWorkerMan = false;
 	public static $isConsole = false;
-    /**
-     * @var Worker2|swoole_server $server
-     */
     public $server; //服务实例
     public $childSrv = []; //多个监听时的子服务
     protected $config;

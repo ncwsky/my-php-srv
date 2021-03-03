@@ -7,7 +7,7 @@ class WorkerManEvent{
         $fd = $connection->id;
     }
     //接收到数据时回调此函数
-    public static function onReceive(ConnectionInterface $connection, $data){
+    public static function onMessage(ConnectionInterface $connection, $data){
         /*if(SrvBase::$instance->getConfig('max_request',0)>0){
             static $request_count;
             // 业务处理略

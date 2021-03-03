@@ -51,7 +51,7 @@ class SwooleSrv extends SrvBase {
      * @param int $worker_id [0-$worker_num)区间内的数字
      * @return bool
      */
-    final public function _onWorkerStart(swoole_server $server, int $worker_id){
+    final public function _onWorkerStart($server, $worker_id){
         $this->initMyPhp();
         if (!$server->taskworker) { //worker进程
             #Config::set('APP_ROOT', dirname($_SERVER['SCRIPT_NAME'])); //重置app_root目录
@@ -78,7 +78,12 @@ class SwooleSrv extends SrvBase {
         $this->onWorkerStart($server, $worker_id);
     }
     //此事件在Worker进程终止时发生 在此函数中可以回收Worker进程申请的各类资源
-    final public function _onWorkerStop(swoole_server $server, int $worker_id){
+
+    /**
+     * @param swoole_server $server
+     * @param int $worker_id
+     */
+    final public function _onWorkerStop($server, $worker_id){
         if (!$server->taskworker) { //worker进程  异常结束后执行的逻辑
             echo 'Worker Stop clear' . PHP_EOL;
             $timer = new SwooleTimer();
@@ -88,7 +93,11 @@ class SwooleSrv extends SrvBase {
     }
     //仅在开启reload_async特性后有效。异步重启特性，会先创建新的Worker进程处理新请求，旧的Worker进程自行退出。
     //https://wiki.swoole.com/wiki/page/808.html
-    public function onWorkerExit(swoole_server $server, int $worker_id){
+    /**
+     * @param swoole_server $server
+     * @param int $worker_id
+     */
+    public function onWorkerExit($server, $worker_id){
         //todo
         /*if($timers = (new SwooleTimer())->timer()) { //直接读取配置文件
             foreach ($timers as $item){ #清除当前工作进程内的所有定时器
@@ -104,7 +113,7 @@ class SwooleSrv extends SrvBase {
      * @param int $exit_code 退出的状态码，范围是 0～255
      * @param int $signal 进程退出的信号
      */
-    final public function _onWorkerError(swoole_server $server, int $worker_id, int $worker_pid, int $exit_code, int $signal){
+    final public function _onWorkerError(swoole_server $server, $worker_id, $worker_pid, $exit_code, $signal){
         $err = '异常进程的编号:'.$worker_id.', 异常进程的ID:'.$worker_pid.', 退出的状态码:'.$exit_code.', 进程退出信号:'.$signal;
         echo $err,PHP_EOL;
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
@@ -184,56 +193,117 @@ class SwooleSrv extends SrvBase {
         //设置服务配置
         $server->set($this->getConfig('setting'));
 
+        // 获取配置的事件
+        $event = $this->getConfig('event', []);
+
         //初始事件绑定
         //BASE模式无start事件
-        if($this->mode==SWOOLE_PROCESS){
-            $server->on('Start', function(swoole_server $server){//回调有错误时 可能不会有主进程
-                $this->setProcessTitle($this->serverName().'-master');
-                if(method_exists($this, 'onStart')){
+        if ($this->mode == SWOOLE_PROCESS) {
+            $server->on('Start', function (swoole_server $server) {//回调有错误时 可能不会有主进程
+                $this->setProcessTitle($this->serverName() . '-master');
+                if (method_exists($this, 'onStart')) {
                     $this->initMyPhp();
                     $this->onStart();
                 }
             });
         }
         $server->on('Shutdown', [$this, 'onShutdown']);
-        $server->on('ManagerStart', [$this, '_onManagerStart']);
-        $server->on('ManagerStop', [$this, '_onManagerStop']);
+        $server->on('ManagerStart', function ($server) use ($event) {
+            $this->_onManagerStart($server);
+            isset($event['onManagerStart']) && call_user_func($event['onManagerStart'], $server);
+        });
+        $server->on('ManagerStop', function ($server) use ($event) {
+            $this->_onManagerStop($server);
+            isset($event['onManagerStop']) && call_user_func($event['onManagerStop'], $server);
+        });
 
-        $server->on('WorkerStart', [$this, '_onWorkerStart']);
-        $server->on('WorkerStop', [$this, '_onWorkerStop']);
-        $server->on('WorkerError', [$this, '_onWorkerError']);
-        if($this->getConfig('setting.reload_async', false)) { //异步安全重启特性
-            $server->on('WorkerExit', [$this, 'onWorkerExit']);
+        $server->on('WorkerStart', function ($server, $worker_id) use ($event) {
+            $this->_onWorkerStart($server, $worker_id);
+            isset($event['onWorkerStart']) && call_user_func($event['onWorkerStart'], $server, $worker_id);
+        });
+
+        $server->on('WorkerStop', function ($server, $worker_id) use ($event) {
+            $this->_onWorkerStop($server, $worker_id);
+            isset($event['onWorkerStop']) && call_user_func($event['onWorkerStop'], $server, $worker_id);
+        });
+
+        $server->on('WorkerError', function ($server, $worker_id, $worker_pid, $exit_code, $signal) use ($event) {
+            $this->_onWorkerError($server, $worker_id, $worker_pid, $exit_code, $signal);
+            isset($event['onWorkerError']) && call_user_func($event['onWorkerError'], $server, $worker_id, self::err());
+        });
+
+        if ($this->getConfig('setting.reload_async', false)) { //异步安全重启特性
+            $server->on('WorkerExit', function ($server, $worker_id) use ($event) {
+                if(isset($event['onWorkerExit'])){
+                    call_user_func($event['onWorkerExit'], $server, $worker_id);
+                }else{
+                    $this->onWorkerExit($server, $worker_id);
+                }
+            });
         }
         //事件
-        $server->on('Connect', function (swoole_server $server, int $fd, int $reactorId) {
-            return SwooleEvent::OnConnect($server, $fd, $reactorId);
+        $server->on('Connect', function ($server, $fd, $reactorId) use ($event) {
+            if (isset($event['onConnect'])) {
+                call_user_func($event['onConnect'], $server, $fd, $reactorId);
+            } else {
+                SwooleEvent::OnConnect($server, $fd, $reactorId);
+            }
         });
-        $server->on('Receive', function (swoole_server $srv, $fd, $reactor_id, $data) {
-            return SwooleEvent::OnReceive($srv, $fd, $reactor_id, $data);
+
+        $server->on('Receive', function ($server, $fd, $reactor_id, $data) use ($event) {
+            if (isset($event['onReceive'])) {
+                call_user_func($event['onReceive'], $server, $fd, $reactor_id, $data);
+            } else {
+                SwooleEvent::OnReceive($server, $fd, $reactor_id, $data);
+            }
         });
-        $server->on('Close', function (swoole_server $srv, $fd, $reactorId) {
-            return SwooleEvent::OnClose($srv, $fd, $reactorId);
+        $server->on('Packet', function ($server, $data, array $client_info) use ($event) {
+            if (isset($event['onPacket'])) {
+                call_user_func($event['onPacket'], $server, $data, $client_info);
+            } else {
+                SwooleEvent::onPacket($server, $data, $client_info);
+            }
+        });
+
+        $server->on('Close', function ($server, $fd, $reactorId) use ($event) {
+            if (isset($event['onClose'])) {
+                call_user_func($event['onClose'], $server, $fd, $reactorId);
+            } else {
+                SwooleEvent::OnClose($server, $fd, $reactorId);
+            }
         });
 
         if ($this->getConfig('setting.task_worker_num', 0)) { //启用了
-            $server->on('Task', function (swoole_server $server, int $task_id, int $src_worker_id, $data){
-                SwooleEvent::OnTask($server, $task_id, $src_worker_id, $data);
+            $server->on('Task', function ($server, $task_id, $src_worker_id, $data) use ($event) {
+                if (isset($event['onTask'])) {
+                    call_user_func($event['onTask'], $server, $task_id, $src_worker_id, $data);
+                } else {
+                    SwooleEvent::OnTask($server, $task_id, $src_worker_id, $data);
+                }
             });
-            $server->on('Finish', function (swoole_server $server, int $task_id, string $data){
-                SwooleEvent::OnFinish($server, $task_id, $data);
+            $server->on('Finish', function ($server, $task_id, $data) use ($event) {
+                if (isset($event['onFinish'])) {
+                    call_user_func($event['onFinish'], $server, $task_id, $data);
+                } else {
+                    SwooleEvent::OnFinish($server, $task_id, $data);
+                }
             });
         }
-        if($this->getConfig('type')==self::TYPE_HTTP){
-            $server->on('Request', function ($request, $response){
-                SwooleEvent::OnRequest($request, $response);
+        if ($this->getConfig('type') == self::TYPE_HTTP) {
+            $server->on('Request', function ($request, $response) use ($event) {
+                if (isset($event['onRequest'])) {
+                    call_user_func($event['onRequest'], $request, $response);
+                } else {
+                    SwooleEvent::OnRequest($request, $response);
+                }
             });
         }
 
+        /*
         #设置了task_ipc_mode = 3将无法使用sendMessage向特定的task进程发送消息
         $server->on('PipeMessage', function (swoole_server $srv, $task_id, $data) {
             SwooleEvent::OnPipeMessage($srv, $task_id, $data);
-        });
+        });*/
         /**
          * 用户进程实现了广播功能，循环接收管道消息，并发给服务器的所有连接
          * https://wiki.swoole.com/wiki/page/390.html 参见示例
