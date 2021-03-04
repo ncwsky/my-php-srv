@@ -183,6 +183,7 @@ class SwooleSrv extends SrvBase {
                 }
                 if(isset($item['event'])){ //有自定义事件
                     foreach ($item['event'] as $event=>$fun){
+                        if(strpos($event, 'on')===0) $event = substr($event, 2);
                         $this->childSrv[$k]->on($event, $fun);
                     }
                 }
