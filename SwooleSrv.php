@@ -243,36 +243,23 @@ class SwooleSrv extends SrvBase {
             });
         }
         //事件
-        $server->on('Connect', function ($server, $fd, $reactorId) use ($event) {
-            if (isset($event['onConnect'])) {
-                call_user_func($event['onConnect'], $server, $fd, $reactorId);
-            } else {
-                SwooleEvent::OnConnect($server, $fd, $reactorId);
-            }
-        });
+        if (isset($event['onConnect'])) {
+            $server->on('Connect', $event['onConnect']); // args: $server, $fd, $reactorId
+        }
+        if (isset($event['onClose'])) {
+            $server->on('Close', $event['onClose']); // args: $server, $fd, $reactorId
+        }
+        if (!isset($event['onReceive'])) { //使用非tcp服务时会有这个提示 require onReceive callback 所以兼容下
+            $event['onReceive'] = function($server, $fd, $reactor_id, $data){};
+        }
+        $server->on('Receive', $event['onReceive']); // args: $server, $fd, $reactor_id, $data
 
-        $server->on('Receive', function ($server, $fd, $reactor_id, $data) use ($event) {
-            if (isset($event['onReceive'])) {
-                call_user_func($event['onReceive'], $server, $fd, $reactor_id, $data);
-            } else {
-                SwooleEvent::OnReceive($server, $fd, $reactor_id, $data);
-            }
-        });
-        $server->on('Packet', function ($server, $data, array $client_info) use ($event) {
-            if (isset($event['onPacket'])) {
-                call_user_func($event['onPacket'], $server, $data, $client_info);
-            } else {
-                SwooleEvent::onPacket($server, $data, $client_info);
-            }
-        });
-
-        $server->on('Close', function ($server, $fd, $reactorId) use ($event) {
-            if (isset($event['onClose'])) {
-                call_user_func($event['onClose'], $server, $fd, $reactorId);
-            } else {
-                SwooleEvent::OnClose($server, $fd, $reactorId);
-            }
-        });
+        if (isset($event['onMessage'])) {
+            $server->on('Message', $event['onMessage']); // args: $server, $frame
+        }
+        if (isset($event['onPacket'])) {
+            $server->on('Packet', $event['onPacket']); // args: $server, $data, $client_info
+        }
 
         if ($this->getConfig('setting.task_worker_num', 0)) { //启用了
             $server->on('Task', function ($server, $task_id, $src_worker_id, $data) use ($event) {

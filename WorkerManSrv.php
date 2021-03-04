@@ -201,27 +201,18 @@ class WorkerManSrv extends SrvBase {
             isset($event['onWorkerError']) && call_user_func($event['onWorkerError'], self::$instance->server, $connection->worker->id, $msg);
         };
         //绑定事件
-        $server->onConnect = function ($connection) use ($event) {
-            if (isset($event['onConnect'])) {
-                call_user_func($event['onConnect'], $connection);
-            } else {
-                WorkerManEvent::onConnect($connection);
-            }
-        };
-        $server->onMessage = function ($connection, $data) use ($event) {
-            if (isset($event['onMessage'])) {
-                call_user_func($event['onMessage'], $connection, $data);
-            } else {
-                WorkerManEvent::onMessage($connection, $data);
-            }
-        };
-        $server->onClose = function ($connection) use ($event) {
-            if (isset($event['onClose'])) {
-                call_user_func($event['onClose'], $connection);
-            } else {
-                WorkerManEvent::onClose($connection);
-            }
-        };
+        if (isset($event['onConnect'])) {
+            $server->onConnect = $event['onConnect']; // args: $connection
+        }
+        if (isset($event['onMessage'])) {
+            $server->onMessage = $event['onMessage']; // args: $connection, $data
+        }else{
+            $server->onMessage = ['WorkerManEvent', 'onMessage'];
+        }
+        if (isset($event['onClose'])) {
+            $server->onClose = $event['onClose']; // args: $connection
+        }
+
         $server->onBufferFull = function ($connection) use ($event) {
             if (isset($event['onBufferFull'])) {
                 call_user_func($event['onBufferFull'], $connection);
