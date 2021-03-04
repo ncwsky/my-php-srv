@@ -266,23 +266,23 @@ class SwooleSrv extends SrvBase {
                 if (isset($event['onTask'])) {
                     call_user_func($event['onTask'], $server, $task_id, $src_worker_id, $data);
                 } else {
-                    SwooleEvent::OnTask($server, $task_id, $src_worker_id, $data);
+                    SwooleEvent::onTask($server, $task_id, $src_worker_id, $data);
                 }
             });
             $server->on('Finish', function ($server, $task_id, $data) use ($event) {
                 if (isset($event['onFinish'])) {
                     call_user_func($event['onFinish'], $server, $task_id, $data);
                 } else {
-                    SwooleEvent::OnFinish($server, $task_id, $data);
+                    SwooleEvent::onFinish($server, $task_id, $data);
                 }
             });
         }
-        if ($this->getConfig('type') == self::TYPE_HTTP) {
+        if ($this->getConfig('type') == self::TYPE_HTTP || isset($event['onRequest'])) {
             $server->on('Request', function ($request, $response) use ($event) {
                 if (isset($event['onRequest'])) {
                     call_user_func($event['onRequest'], $request, $response);
                 } else {
-                    SwooleEvent::OnRequest($request, $response);
+                    SwooleEvent::onRequest($request, $response);
                 }
             });
         }
@@ -290,7 +290,7 @@ class SwooleSrv extends SrvBase {
         /*
         #设置了task_ipc_mode = 3将无法使用sendMessage向特定的task进程发送消息
         $server->on('PipeMessage', function (swoole_server $srv, $task_id, $data) {
-            SwooleEvent::OnPipeMessage($srv, $task_id, $data);
+            SwooleEvent::onPipeMessage($srv, $task_id, $data);
         });*/
         /**
          * 用户进程实现了广播功能，循环接收管道消息，并发给服务器的所有连接

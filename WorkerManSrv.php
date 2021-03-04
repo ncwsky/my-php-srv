@@ -304,7 +304,7 @@ class WorkerManSrv extends SrvBase {
                 if (isset($event['onTask'])) {
                     call_user_func($event['onTask'], $task_id, $src_worker_id, $data);
                 } else {
-                    WorkerManEvent::OnTask($task_id, $src_worker_id, $data);
+                    WorkerManEvent::onTask($task_id, $src_worker_id, $data);
                 }
             };
 
