@@ -69,6 +69,7 @@ abstract class SrvBase{
         include $this->getConfig('conf_file', $this->runDir. '/conf.php') ;
         #$cfg = $this->config;
         include $this->getConfig('myphp_dir', $this->runDir.'/myphp').'/base.php';
+        myphp::Analysis(false);
     }
     final protected function setProcessTitle($title){
         // >=php 5.5

@@ -77,9 +77,9 @@ class WorkerManSrv extends SrvBase {
             Worker::safeEcho("run dir:".$this->runDir.PHP_EOL);
             self::$isConsole && Log::write($_SERVER, 'server');
         }
-        myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
+        /*myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
             #echo "init myphp:".$worker_id, PHP_EOL;
-        }, false);
+        }, false);*/
         if($this->getConfig('timer_file')){
             //定时载入
             $timer = new WorkerManTimer();
@@ -391,9 +391,9 @@ class WorkerManSrv extends SrvBase {
         $worker_id = $worker->id;
         $this->initMyPhp();
         #Worker::safeEcho("childWorker init myphp:".$worker_id.PHP_EOL);
-        myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
+        /*myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
             #echo "init myphp:".$worker_id, PHP_EOL;
-        }, false);
+        }, false);*/
     }
     //创建进程通信服务
     public function chainWorker(){

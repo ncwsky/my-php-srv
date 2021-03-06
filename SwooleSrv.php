@@ -57,9 +57,9 @@ class SwooleSrv extends SrvBase {
             #Config::set('APP_ROOT', dirname($_SERVER['SCRIPT_NAME'])); //重置app_root目录
             #echo "init myphp:".$worker_id, PHP_EOL;
             if($worker_id==0 && self::$isConsole) Log::write($_SERVER, 'server');
-            myphp::Run(function($code, $data, $header) use($worker_id){
+/*            myphp::Run(function($code, $data, $header) use($worker_id){
                 #echo "init myphp:".$worker_id, PHP_EOL;
-            }, false);
+            }, false);*/
             if($this->getConfig('timer_file')){
                 //定时载入
                 $timer = new SwooleTimer();
