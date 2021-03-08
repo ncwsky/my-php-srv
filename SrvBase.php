@@ -64,12 +64,24 @@ abstract class SrvBase{
     }
     final protected function initMyPhp(){
         $this->hasInitMyPhp = true;
-
-        //todo 循环load配置文件或匿名函数 ['file1','file2',...,function(){},...];
-        include $this->getConfig('conf_file', $this->runDir. '/conf.php') ;
-        #$cfg = $this->config;
-        include $this->getConfig('myphp_dir', $this->runDir.'/myphp').'/base.php';
-        myphp::Analysis(false);
+        $worker_load = $this->getConfig('worker_load');
+        if($worker_load){
+            if(!is_array($worker_load)){
+                $worker_load = [$worker_load];
+            }
+            //todo 循环load配置文件或匿名函数 ['file1','file2',...,function(){},...] || function(){};
+            foreach ($worker_load as $load){
+                if(is_file($load)){
+                    include $load;
+                }else{
+                    call_user_func($load);
+                }
+            }
+        }else{
+            include $this->getConfig('conf_file', $this->runDir. '/conf.php') ;
+            include $this->getConfig('myphp_dir', $this->runDir.'/myphp').'/base.php';
+            myphp::Analysis(false);
+        }
     }
     final protected function setProcessTitle($title){
         // >=php 5.5
