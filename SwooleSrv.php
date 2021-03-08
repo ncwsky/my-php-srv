@@ -56,7 +56,10 @@ class SwooleSrv extends SrvBase {
         if (!$server->taskworker) { //worker进程
             #Config::set('APP_ROOT', dirname($_SERVER['SCRIPT_NAME'])); //重置app_root目录
             #echo "init myphp:".$worker_id, PHP_EOL;
-            if($worker_id==0 && self::$isConsole) Log::write($_SERVER, 'server');
+            if($worker_id==0) {
+                echo "run dir:".$this->runDir.PHP_EOL;
+                if(self::$isConsole) echo json_encode($_SERVER).PHP_EOL;
+            }
 /*            myphp::Run(function($code, $data, $header) use($worker_id){
                 #echo "init myphp:".$worker_id, PHP_EOL;
             }, false);*/

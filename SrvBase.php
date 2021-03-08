@@ -71,7 +71,7 @@ abstract class SrvBase{
             }
             //todo 循环load配置文件或匿名函数 ['file1','file2',...,function(){},...] || function(){};
             foreach ($worker_load as $load){
-                if(is_file($load)){
+                if(is_string($load) && is_file($load)){
                     include $load;
                 }else{
                     call_user_func($load);
@@ -105,7 +105,6 @@ abstract class SrvBase{
     }
     protected function onWorkerError($server, $worker_id, $err){
         //todo
-        #Log::write($err, 'err');
     }
 
     /** 返回当前进程的id
