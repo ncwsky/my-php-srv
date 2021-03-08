@@ -75,7 +75,7 @@ class WorkerManSrv extends SrvBase {
         #Worker::safeEcho("init myphp:".$worker_id.PHP_EOL);
         if($worker_id==0){
             Worker::safeEcho("run dir:".$this->runDir.PHP_EOL);
-            self::$isConsole && Worker::safeEcho(json_encode($_SERVER));
+            self::$isConsole && Worker::safeEcho(json_encode($_SERVER).PHP_EOL);
         }
         /*myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
             #echo "init myphp:".$worker_id, PHP_EOL;
