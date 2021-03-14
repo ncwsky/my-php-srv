@@ -84,6 +84,7 @@ abstract class SrvBase{
         }
     }
     final protected function setProcessTitle($title){
+        set_error_handler(function(){});
         // >=php 5.5
         if (function_exists('cli_set_process_title')) {
             cli_set_process_title($title);
@@ -91,6 +92,7 @@ abstract class SrvBase{
         elseif (extension_loaded('proctitle') && function_exists('setproctitle')) {
             setproctitle($title);
         }
+        restore_error_handler();
     }
 
     /****** 分隔线 ******/
