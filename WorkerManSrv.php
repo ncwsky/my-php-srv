@@ -87,7 +87,7 @@ class WorkerManSrv extends SrvBase {
             $timer->start($worker_id);
         }
         //主进程回调处理
-        if($worker_id==0 && @file_get_contents($this->runLock)==='0'){
+        if($worker_id==0 && file_exists($this->runLock) && @file_get_contents($this->runLock)==='0'){
             if(method_exists($this, 'onStart')){
                 $this->onStart();
             }
