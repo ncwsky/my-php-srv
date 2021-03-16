@@ -159,10 +159,10 @@ abstract class SrvBase{
         $this->exec();
     }
     abstract public function relog();
-    public function stop(){
+    public function stop($sig=SIGTERM){
         if($pid=self::pid()){
             echo "Stopping...",PHP_EOL;
-            if(posix_kill($pid, SIGTERM)){ //15 可安全关闭(等待任务处理结束)服务器
+            if(posix_kill($pid, $sig)){ //15 可安全关闭(等待任务处理结束)服务器
                 sleep(1);
                 while(self::pid()){
                     echo "Waiting for ". $this->serverName() ." to shutdown...",PHP_EOL;
@@ -179,9 +179,9 @@ abstract class SrvBase{
         }
         return true;
     }
-    public function reload(){
+    public function reload($sig=SIGUSR1){
         if($pid=self::pid()){
-            $ret = posix_kill($pid, SIGUSR1); //10
+            $ret = posix_kill($pid, $sig); //10
             if($ret){
                 echo 'reload ok!',PHP_EOL;
                 return true;

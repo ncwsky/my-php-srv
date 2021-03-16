@@ -61,6 +61,7 @@ class WorkerManSrv extends SrvBase {
     private $runLock = ''; #用于判定重载onStart处理
     public function __construct($config){
         parent::__construct($config);
+        $this->pidFile = $this->getConfig('setting.pidFile', $this->runDir .'/server.pid');
         $this->runLock = $this->runDir.'/runLock';
     }
     /** 此事件在Worker进程启动时发生 这里创建的对象可以在进程生命周期内使用 如mysql/redis...
@@ -293,7 +294,6 @@ class WorkerManSrv extends SrvBase {
                     }
                 }
 
-                $childSrv->listen();
                 $this->address .= '; '.$item['type'].'://'.$item['ip'].':'.$item['port'];
             }
         }
@@ -336,7 +336,7 @@ class WorkerManSrv extends SrvBase {
                     call_user_func($this->server->onTask, $taskWorker->id, $this->server->id, $data);
                 }
             };
-            $taskWorker->listen();
+            //$taskWorker->listen();
             self::$taskWorker = $taskWorker;
         }
 
@@ -582,6 +582,7 @@ class WorkerManSrv extends SrvBase {
             if(!$childSrv->onClose){
                 $childSrv->onClose = $this->server->onClose;
             }
+            #$childSrv->listen();
         }
 
         Worker::runAll();
@@ -623,6 +624,31 @@ class WorkerManSrv extends SrvBase {
                 break;
             default:
                 $this->start();
+/*            case 'reload':
+                $this->reload(SIGUSR1);
+                break;
+            case 'stop':
+                $this->stop(SIGINT);
+                break;
+            case 'restart':
+                $this->stop(SIGINT);
+                echo "Start ".$this->serverName(),PHP_EOL;
+                $this->start();
+                break;
+            case 'status':
+                $this->start();
+                break;
+            case 'start':
+                if($this->pid()){
+                    echo $this->pidFile." exists, ".$this->serverName()." is already running or crashed.",PHP_EOL;
+                    exit();
+                }else{
+                    echo "Start ".$this->serverName(),PHP_EOL;
+                }
+                $this->start();
+                break;
+            default:
+                echo 'Usage: '. $this->runFile .' {([--console]|start[--console])|stop|restart[--console]|reload|relog|status}',PHP_EOL;*/
         }
     }
 }
