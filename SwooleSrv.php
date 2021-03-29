@@ -131,8 +131,9 @@ class SwooleSrv extends SrvBase {
         if($isSSL){
             $sockType =  SWOOLE_SOCK_TCP | SWOOLE_SSL;
         }
+        $type = $this->getConfig('type');
         //监听1024以下的端口需要root权限
-        switch ($this->getConfig('type')){
+        switch ($type){
             case self::TYPE_HTTP:
                 $this->server = new swoole_http_server($this->ip, $this->port, $this->mode, $sockType);
                 $this->address = self::TYPE_HTTP;
@@ -257,11 +258,14 @@ class SwooleSrv extends SrvBase {
         }
         $server->on('Receive', $event['onReceive']); // args: $server, $fd, $reactor_id, $data
 
-        if (isset($event['onMessage'])) {
-            $server->on('Message', $event['onMessage']); // args: $server, $frame
-        }
-        if (isset($event['onPacket'])) {
-            $server->on('Packet', $event['onPacket']); // args: $server, $data, $client_info
+        if($type==self::TYPE_WEB_SOCKET){
+            if (isset($event['onMessage'])) {
+                $server->on('Message', $event['onMessage']); // args: $server, $frame
+            }
+        }elseif($type==self::TYPE_UDP){
+            if (isset($event['onPacket'])) {
+                $server->on('Packet', $event['onPacket']); // args: $server, $data, $client_info
+            }
         }
 
         if ($this->getConfig('setting.task_worker_num', 0)) { //启用了
