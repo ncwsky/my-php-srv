@@ -45,14 +45,13 @@ class SwooleEvent{
     public static function onRequest(swoole_http_request $request, swoole_http_response $response){
         SrvBase::$isHttp = true;
         $_SERVER = array_change_key_case($request->server,CASE_UPPER);
-        //客户端的真实IP
-        if(isset($request->header['x-real-ip'])) {
-            Helper::$isProxy = true;
-            $_SERVER['HTTP_X_REAL_IP'] = $request->header['x-real-ip'];
+        foreach ($request->header as $k=>$v){
+            $k = ($k == 'content-type' || $k == 'content-length' ? '' : 'HTTP_') . str_replace('-', '_', strtoupper($k));
+            $_SERVER[$k] = $v;
         }
-        if(isset($request->header['x-forwarded-for'])) {
+        //客户端的真实IP
+        if(isset($request->header['x-real-ip']) || isset($request->header['x-forwarded-for'])) { // HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
             Helper::$isProxy = true;
-            $_SERVER['HTTP_X_FORWARDED_FOR'] = $request->header['x-real-ip'];
         }
 
         $_COOKIE = $_FILES = $_REQUEST = $_POST = $_GET = [];

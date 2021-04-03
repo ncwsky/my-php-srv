@@ -30,12 +30,13 @@ class WorkerManEvent{
             $_REQUEST = array_merge($_GET, $_POST);
             $_SERVER['REMOTE_ADDR'] = $connection->getRemoteIp();
             $_SERVER['REQUEST_METHOD'] = $data->method();
-            if($xRealIp=$data->header('x-real-ip')){
-                $_SERVER['HTTP_X_REAL_IP'] = $xRealIp;
-                $_SERVER['REMOTE_ADDR'] = $xRealIp;
+            foreach ($data->header() as $k=>$v){
+                $k = ($k == 'content-type' || $k == 'content-length' ? '' : 'HTTP_') . str_replace('-', '_', strtoupper($k));
+                $_SERVER[$k] = $v;
             }
-            if($xForwardedFor=$data->header('x-forwarded-for')){
-                $_SERVER['HTTP_X_FORWARDED_FOR'] = $xForwardedFor;
+            //客户端的真实IP
+            if($data->header('x-real-ip') || $data->header('x-forwarded-for')) { // HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
+                Helper::$isProxy = true;
             }
             $_SERVER['HTTP_HOST'] = $data->host();
             $_SERVER['SCRIPT_NAME'] = '/index.php';
