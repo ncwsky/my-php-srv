@@ -54,6 +54,8 @@ class SwooleEvent{
             Helper::$isProxy = true;
         }
 
+        myphp::setEnv('headers', $request->header);
+        myphp::setEnv('rawBody', $request->rawContent()); //file_get_contents("php://input")
         $_COOKIE = $_FILES = $_REQUEST = $_POST = $_GET = [];
         if($request->get) $_GET = &$request->get;
         if($request->post) $_POST = &$request->post;

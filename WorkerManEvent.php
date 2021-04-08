@@ -23,6 +23,7 @@ class WorkerManEvent{
             SrvBase::$isHttp = true;
             //重置
             myphp::setEnv('headers', $data->header());
+            myphp::setEnv('rawBody', $data->rawBody()); //file_get_contents("php://input")
             $_COOKIE = $data->cookie();
             $_FILES = $data->file();
             $_GET = $data->get();
