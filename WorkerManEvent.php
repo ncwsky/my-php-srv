@@ -22,6 +22,7 @@ class WorkerManEvent{
         if(self::$onlyHttp || (isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)){
             SrvBase::$isHttp = true;
             //重置
+            $_SERVER = myphp::env('_server', $_SERVER); //使用初始的server 防止server一直增加数据
             myphp::setEnv('headers', $data->header());
             myphp::setEnv('rawBody', $data->rawBody()); //file_get_contents("php://input")
             $_COOKIE = $data->cookie();
@@ -74,6 +75,9 @@ class WorkerManEvent{
                     $response->withBody(is_string($data) ? $data : toJson($data));
                     $connection->send($response);
                 }, false);
+                //清除本次请求的数据
+                myphp::setEnv('headers');
+                myphp::setEnv('rawBody');
             }
         }else{
             $connection->send($data);
@@ -107,6 +111,7 @@ class WorkerManEvent{
             //is_string($data) ? $data : toJson($data)
             if(SwooleSrv::$isConsole) echo "AsyncTask Finish:Connect.task_id=" . $task_id . (is_string($data) ? $data : toJson($data)). PHP_EOL;
         }, false);
+        unset($_SERVER, $_REQUEST, $_GET, $_POST);
         return true;
         //return 等同$server->finish($response); 这里没有return不会触发finish事件
     }

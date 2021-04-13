@@ -27,6 +27,7 @@ class SwooleEvent{
             //is_string($data) ? $data : toJson($data)
             if(SwooleSrv::$isConsole) echo "AsyncTask Finish:Connect.task_id=" . $task_id . (is_string($data) ? $data : toJson($data)). PHP_EOL;
         }, false);
+        unset($_SERVER, $_REQUEST, $_GET, $_POST);
         //return 等同$server->finish($response); 这里没有return不会触发finish事件
     }
     //异步任务完成 当worker进程投递的任务在task_worker中完成时，task进程会通过swoole_server->finish()方法将任务处理的结果发送给worker进程
@@ -88,6 +89,9 @@ class SwooleEvent{
                 $response->status($code);
                 $response->write(is_string($data) ? $data : toJson($data));
             }, false);
+            //清除本次请求的数据
+            myphp::setEnv('headers');
+            myphp::setEnv('rawBody');
         }
         $response->end();
     }
