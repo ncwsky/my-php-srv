@@ -300,7 +300,6 @@ class WorkerManSrv extends SrvBase {
         $server->onTask = null;
         if ($this->getConfig('setting.task_worker_num', 0) && !self::$taskWorker) { //启用了
             $server->onTask = function ($task_id, $src_worker_id, $data) use ($event){
-                #echo 'taskId:',$task_id,'; src_workerId:',$src_worker_id,PHP_EOL;
                 if (isset($event['onTask'])) {
                     call_user_func($event['onTask'], $task_id, $src_worker_id, $data);
                 } else {
@@ -340,6 +339,9 @@ class WorkerManSrv extends SrvBase {
             self::$taskWorker = $taskWorker;
         }
 
+        Worker::$onMasterReload = function (){
+            self::$chainSocketFile && file_exists(self::$chainSocketFile) && @unlink(self::$chainSocketFile);
+        };
         #结束时销毁处理
         Worker::$onMasterStop = function (){
             if(method_exists($this, 'onStop')){
@@ -398,7 +400,9 @@ class WorkerManSrv extends SrvBase {
     //创建进程通信服务
     public function chainWorker(){
         $socketFile = (is_dir('/dev/shm') ? '/dev/shm/' : $this->runDir) . '/' . $this->serverName() . '_chain.sock';
-        file_exists($socketFile) && @unlink($socketFile);
+        if(file_exists($socketFile) && file_exists($this->runLock) && @file_get_contents($this->runLock)==='0'){
+            @unlink($socketFile);
+        }
 
         self::$chainSocketFile = $socketFile;
         $chainWorker = new Worker2('unix://'.$socketFile);
