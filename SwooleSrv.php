@@ -350,9 +350,9 @@ class SwooleSrv extends SrvBase {
     final public function relog(){
         $logFile = $this->getConfig('setting.log_file', $this->runDir .'/server.log');
         if($logFile) file_put_contents($logFile,'', LOCK_EX);
-        if($pid=self::pid()){
-            posix_kill($pid, SIGRTMIN); //34
-        }
+        /*if($pid=self::pid()){
+            posix_kill($pid, SIGRTMIN); //34  运行时日志不存在可重新打开日志文件
+        }*/
         echo '['.$logFile.'] relog ok!',PHP_EOL;
         return true;
     }
