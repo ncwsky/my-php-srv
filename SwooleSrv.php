@@ -10,10 +10,10 @@ class SwooleSrv extends SrvBase {
      * SwooleSrv constructor.
      * @param array $config
      */
-	public function __construct($config)
+	public function __construct($config, $mode=SWOOLE_PROCESS)
     {
         parent::__construct($config);
-        $this->mode = SWOOLE_PROCESS;
+        $this->mode = $mode;
     }
     //此事件在Server正常结束时发生
     public function onShutdown(swoole_server $server){
