@@ -10,7 +10,8 @@ abstract class SrvTimer {
         $this->timerFile = SrvBase::$instance->getConfig('timer_file'); //, SrvBase::$instance->runDir .'/timer.json' //无定时记录文件时 定时重启后失效
         $this->shmFile =  $this->timerFile ? '/dev/shm/'.str_replace(['/','\\'],'',  SrvBase::$instance->serverName().'_'.$this->timerFile) : '';
         //定时处理载入
-        myphp::class_dir(SrvBase::$instance->getConfig('timer_dir', APP_PATH.'/timer'));
+        $time_dir = SrvBase::$instance->getConfig('timer_dir', APP_PATH.'/timer');
+        is_dir($time_dir) && myphp::class_dir($time_dir);
     }
     //销毁定时内存缓存配置
     public static function destroy(){
