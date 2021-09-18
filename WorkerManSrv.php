@@ -46,6 +46,7 @@ class Worker2 extends Worker{
 }
 
 class WorkerManSrv extends SrvBase {
+    public static $_SERVER;
     public $isWorkerMan = true;
     /**
      * @var Worker2 $server
@@ -61,6 +62,7 @@ class WorkerManSrv extends SrvBase {
     private $runLock = ''; #用于判定重载onStart处理
     public function __construct($config){
         parent::__construct($config);
+        self::$_SERVER = $_SERVER; //存放初始的$_SERVER
         $this->pidFile = $this->getConfig('setting.pidFile', $this->runDir .'/server.pid');
         $this->runLock = $this->runDir.'/runLock';
     }

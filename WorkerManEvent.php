@@ -22,7 +22,7 @@ class WorkerManEvent{
         if(self::$onlyHttp || (isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)){
             SrvBase::$isHttp = true;
             //重置
-            $_SERVER = myphp::env('_server', $_SERVER); //使用初始的server 防止server一直增加数据
+            $_SERVER = WorkerManSrv::$_SERVER; //使用初始的server 防止server一直增加数据
             myphp::setEnv('headers', $data->header());
             myphp::setEnv('rawBody', $data->rawBody()); //file_get_contents("php://input")
             $_COOKIE = $data->cookie();
