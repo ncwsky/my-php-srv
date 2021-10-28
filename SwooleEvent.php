@@ -87,7 +87,11 @@ class SwooleEvent{
                     }
                 }
                 $response->status($code);
-                $response->write(is_string($data) ? $data : toJson($data));
+                if (is_string($data)) {
+                    $data !== '' && $response->write($data);
+                } else {
+                    $response->write(toJson($data));
+                }
             }, false);
             //清除本次请求的数据
             myphp::setEnv('headers');

@@ -72,7 +72,11 @@ class WorkerManEvent{
                     // 发送头部信息
                     $response->withHeaders($header);
                     // 发送内容
-                    $response->withBody(is_string($data) ? $data : toJson($data));
+                    if (is_string($data)) {
+                        $data !== '' && $response->withBody($data);
+                    } else {
+                        $response->withBody(toJson($data));
+                    }
                     $connection->send($response);
                 }, false);
                 //清除本次请求的数据
