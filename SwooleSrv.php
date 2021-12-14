@@ -126,6 +126,7 @@ class SwooleSrv extends SrvBase {
     //初始服务
     final public function init(){
         $this->config['setting']['daemonize'] = self::$isConsole ? 0 : 1; //守护进程化;
+        //if(!isset($this->config['setting']['max_wait_time'])) $this->config['setting']['max_wait_time'] = 10; #进程收到停止服务通知后最大等待时间
         $sockType = SWOOLE_SOCK_TCP; //todo ipv6待测试后加入
         $isSSL = isset($this->config['setting']['ssl_cert_file']); //是否使用的证书
         if($isSSL){
@@ -357,7 +358,14 @@ class SwooleSrv extends SrvBase {
         return true;
     }
     public function run(&$argv){
-        $action = isset($argv[1]) ? $argv[1] : 'start';
+        $action = ''; //$action = isset($argv[1]) ? $argv[1] : 'start';
+        $allow_action = ['relog', 'reloadTask', 'reload', 'stop', 'restart', 'status', 'start'];
+        foreach ($argv as $value) {
+            if (in_array($value, $allow_action)) {
+                $action = $value;
+                break;
+            }
+        }
         self::$isConsole = array_search('--console', $argv);
         if($action=='--console') $action = 'start';
         switch($action){
