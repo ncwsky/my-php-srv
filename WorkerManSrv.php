@@ -615,10 +615,19 @@ class WorkerManSrv extends SrvBase {
     }
 
     public function run(&$argv){
-        $action = isset($argv[1]) ? $argv[1] : 'start';
+        $action = ''; //$action = isset($argv[1]) ? $argv[1] : 'start';
+        $allow_action = ['relog', 'reload', 'stop', 'restart', 'status', 'start'];
+        foreach ($argv as $value) {
+            if (in_array($value, $allow_action)) {
+                $action = $value;
+                break;
+            }
+        }
         self::$isConsole = array_search('--console', $argv);
-        if($action=='--console') $action = 'start';
-        $argv[1] = $action; //置启动参数
+        if($action=='' || $action=='--console') {
+            $action = 'start';
+            $argv[1] = $action; //置启动参数
+        }
         if($action=='reload'){
             file_put_contents($this->runLock, 1); #用于判定重载onStart处理
         }elseif($action=='start' || $action=='restart'){

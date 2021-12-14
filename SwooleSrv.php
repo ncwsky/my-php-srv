@@ -367,7 +367,7 @@ class SwooleSrv extends SrvBase {
             }
         }
         self::$isConsole = array_search('--console', $argv);
-        if($action=='--console') $action = 'start';
+        if($action=='' || $action=='--console') $action = 'start';
         switch($action){
             case 'relog':
                 $this->relog();
