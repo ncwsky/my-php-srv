@@ -45,7 +45,7 @@ class WorkerManEvent{
             $_SERVER['PHP_SELF'] = $data->path();
             $_SERVER["REQUEST_URI"] = $data->uri();
             $_SERVER['QUERY_STRING'] = $data->queryString();
-            Log::DEBUG('[http]'.toJson($_REQUEST));
+            Log::trace('[http]'.toJson($_REQUEST));
             if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
             if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
             if (Q('async%d')==1) { //异步任务

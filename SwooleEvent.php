@@ -66,7 +66,7 @@ class SwooleEvent{
         if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
         if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
 
-        Log::DEBUG('[http]'.toJson($_REQUEST));
+        Log::trace('[http]'.toJson($_REQUEST));
         if (Q('async%d')==1) { //异步任务
             $task_id = SwooleSrv::$instance->task([
                 '_SERVER'=>$_SERVER,
