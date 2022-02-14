@@ -16,26 +16,6 @@ class SwooleEvent{
     public static function onClose(swoole_server $server, int $fd, int $reactorId){
 
     }
-    //异步任务 在task_worker进程内被调用
-    public static function onTask(swoole_server $server, int $task_id, int $src_worker_id, $data){
-        //重置
-        $_SERVER = $data['_SERVER'];
-        $_REQUEST = $data['_REQUEST'];
-        $_GET = $data['_GET'];
-        $_POST = $data['_POST'];
-        myphp::Run(function($code, $data, $header) use($task_id){
-            //is_string($data) ? $data : toJson($data)
-            if(SwooleSrv::$isConsole) echo "AsyncTask Finish:Connect.task_id=" . $task_id . (is_string($data) ? $data : toJson($data)). PHP_EOL;
-        }, false);
-        unset($_SERVER, $_REQUEST, $_GET, $_POST);
-        //return 等同$server->finish($response); 这里没有return不会触发finish事件
-    }
-    //异步任务完成 当worker进程投递的任务在task_worker中完成时，task进程会通过swoole_server->finish()方法将任务处理的结果发送给worker进程
-    //return void;
-    public static function onFinish(swoole_server $server, int $task_id, string $data){
-        //todo
-        //echo "AsyncTask Finish:Connect.task_id=" . $task_id .", " . $data.PHP_EOL;
-    }
     //当工作进程收到由 sendMessage 发送的管道消息时会触发onPipeMessage事件
     //参见 https://wiki.swoole.com/wiki/page/363.html
     //return void;
@@ -46,33 +26,35 @@ class SwooleEvent{
     public static function onRequest(swoole_http_request $request, swoole_http_response $response){
         SrvBase::$isHttp = true;
         $_SERVER = array_change_key_case($request->server,CASE_UPPER);
+        $_COOKIE = $_FILES = $_REQUEST = $_POST = $_GET = [];
+        if($request->cookie) $_COOKIE = &$request->cookie;
+        if($request->files) $_FILES = &$request->files;
+        if($request->get) $_GET = &$request->get;
+        if($request->post) $_POST = &$request->post;
+        $_REQUEST = array_merge($_GET, $_POST);
         foreach ($request->header as $k=>$v){
             $k = ($k == 'content-type' || $k == 'content-length' ? '' : 'HTTP_') . str_replace('-', '_', strtoupper($k));
             $_SERVER[$k] = $v;
         }
-        //客户端的真实IP
-        if(isset($request->header['x-real-ip']) || isset($request->header['x-forwarded-for'])) { // HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
+        //客户端的真实IP HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
+        if(isset($request->header['x-real-ip']) || isset($request->header['x-forwarded-for'])) {
             Helper::$isProxy = true;
         }
 
-        myphp::setEnv('headers', $request->header);
-        myphp::setEnv('rawBody', $request->rawContent()); //file_get_contents("php://input")
-        $_COOKIE = $_FILES = $_REQUEST = $_POST = $_GET = [];
-        if($request->get) $_GET = &$request->get;
-        if($request->post) $_POST = &$request->post;
-        if($request->cookie) $_COOKIE = &$request->cookie;
-        if($request->files) $_FILES = &$request->files;
-        $_REQUEST = array_merge($_GET, $_POST);
-        if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
-        if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
+        Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
 
-        Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . toJson($_POST) : ''));
+        // 可在myphp::Run之前加上 用于post不指定url时通过post数据判断ca
+        //if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
+        //if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
         if (Q('async%d')==1) { //异步任务
             $task_id = SwooleSrv::$instance->task([
-                '_SERVER'=>$_SERVER,
-                '_REQUEST'=>$_REQUEST,
+                '_COOKIE'=>$_COOKIE,
+                '_FILES'=>$_FILES,
                 '_GET'=>$_GET,
-                '_POST'=>$_POST
+                '_POST'=>$_POST,
+                '_REQUEST'=>$_REQUEST,
+                '_SERVER'=>$_SERVER,
+                'rawBody'=>$request->rawContent()
             ]);
             if($task_id===false){
                 $response->write(Helper::toJson(Control::fail('异步任务调用失败:'.SrvBase::err())));
@@ -80,6 +62,8 @@ class SwooleEvent{
                 $response->write(Helper::toJson(Control::ok(['task_id'=>$task_id])));
             }
         } else {
+            myphp::setEnv('headers', $request->header);
+            myphp::setEnv('rawBody', $request->rawContent()); //file_get_contents("php://input")
             myphp::Run(function($code, $data, $header) use($response){
                 if($header) {
                     foreach ($header as $name => $val) {
@@ -98,5 +82,28 @@ class SwooleEvent{
             myphp::setEnv('rawBody');
         }
         $response->end();
+    }
+    //异步任务 在task_worker进程内被调用
+    public static function onTask(swoole_server $server, int $task_id, int $src_worker_id, $data){
+        //重置
+        $_COOKIE = $data['_COOKIE'];
+        $_FILES = $data['_FILES'];
+        $_GET = $data['_GET'];
+        $_POST = $data['_POST'];
+        $_REQUEST = $data['_REQUEST'];
+        $_SERVER = $data['_SERVER'];
+        myphp::setEnv('rawBody', $data['rawBody']);
+        myphp::Run(function($code, $data, $header) use($task_id){
+            if(SwooleSrv::$isConsole) echo "AsyncTask Finish:Connect.task_id=" . $task_id . (is_string($data) ? $data : toJson($data)). PHP_EOL;
+        }, false);
+        unset($_COOKIE, $_FILES, $_GET, $_POST, $_REQUEST, $_SERVER);
+        myphp::setEnv('rawBody'); //清除数据
+        //return 等同$server->finish($response); 这里没有return不会触发finish事件
+    }
+    //异步任务完成 当worker进程投递的任务在task_worker中完成时，task进程会通过swoole_server->finish()方法将任务处理的结果发送给worker进程
+    //return void;
+    public static function onFinish(swoole_server $server, int $task_id, string $data){
+        //todo
+        //echo "AsyncTask Finish:Connect.task_id=" . $task_id .", " . $data.PHP_EOL;
     }
 }

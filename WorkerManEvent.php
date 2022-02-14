@@ -23,8 +23,6 @@ class WorkerManEvent{
             SrvBase::$isHttp = true;
             //重置
             $_SERVER = WorkerManSrv::$_SERVER; //使用初始的server 防止server一直增加数据
-            myphp::setEnv('headers', $data->header());
-            myphp::setEnv('rawBody', $data->rawBody()); //file_get_contents("php://input")
             $_COOKIE = $data->cookie();
             $_FILES = $data->file();
             $_GET = $data->get();
@@ -36,8 +34,8 @@ class WorkerManEvent{
                 $k = ($k == 'content-type' || $k == 'content-length' ? '' : 'HTTP_') . str_replace('-', '_', strtoupper($k));
                 $_SERVER[$k] = $v;
             }
-            //客户端的真实IP
-            if($data->header('x-real-ip') || $data->header('x-forwarded-for')) { // HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
+            //客户端的真实IP HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
+            if($data->header('x-real-ip') || $data->header('x-forwarded-for')) {
                 Helper::$isProxy = true;
             }
             $_SERVER['HTTP_HOST'] = $data->host();
@@ -45,15 +43,21 @@ class WorkerManEvent{
             $_SERVER['PHP_SELF'] = $data->path();
             $_SERVER["REQUEST_URI"] = $data->uri();
             $_SERVER['QUERY_STRING'] = $data->queryString();
-            Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . toJson($_POST) : ''));
-            if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
-            if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
+
+            Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
+
+            // 可在myphp::Run之前加上 用于post不指定url时通过post数据判断ca
+            //if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
+            //if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
             if (Q('async%d')==1) { //异步任务
                 $task_id = SrvBase::$instance->task([
-                    '_SERVER'=>$_SERVER,
-                    '_REQUEST'=>$_REQUEST,
+                    '_COOKIE'=>$_COOKIE,
+                    '_FILES'=>$_FILES,
                     '_GET'=>$_GET,
-                    '_POST'=>$_POST
+                    '_POST'=>$_POST,
+                    '_REQUEST'=>$_REQUEST,
+                    '_SERVER'=>$_SERVER,
+                    'rawBody'=>$data->rawBody()
                 ]);
                 $response = new \Workerman\Protocols\Http\Response(200, [
                     'Content-Type'=>'application/json; charset=utf-8'
@@ -65,6 +69,8 @@ class WorkerManEvent{
                 }
                 $connection->send($response);
             } else {
+                myphp::setEnv('headers', $data->header());
+                myphp::setEnv('rawBody', $data->rawBody()); //file_get_contents("php://input")
                 myphp::Run(function($code, $data, $header) use($connection){
                     $code = isset(myphp::$httpCodeStatus[$code]) ? $code : 200;
                     // 发送状态码
@@ -107,16 +113,18 @@ class WorkerManEvent{
     //异步任务 在task_worker进程内被调用
     public static function onTask($task_id, $src_worker_id, $data){
         //重置
-        $_SERVER = $data['_SERVER'];
-        $_REQUEST = $data['_REQUEST'];
+        $_COOKIE = $data['_COOKIE'];
+        $_FILES = $data['_FILES'];
         $_GET = $data['_GET'];
         $_POST = $data['_POST'];
+        $_REQUEST = $data['_REQUEST'];
+        $_SERVER = $data['_SERVER'];
+        myphp::setEnv('rawBody', $data['rawBody']);
         myphp::Run(function($code, $data, $header) use($task_id){
-            //is_string($data) ? $data : toJson($data)
             if(SwooleSrv::$isConsole) echo "AsyncTask Finish:Connect.task_id=" . $task_id . (is_string($data) ? $data : toJson($data)). PHP_EOL;
         }, false);
-        unset($_SERVER, $_REQUEST, $_GET, $_POST);
+        unset($_COOKIE, $_FILES, $_GET, $_POST, $_REQUEST, $_SERVER);
+        myphp::setEnv('rawBody'); //清除数据
         return true;
-        //return 等同$server->finish($response); 这里没有return不会触发finish事件
     }
 }

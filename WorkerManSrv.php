@@ -331,10 +331,8 @@ class WorkerManSrv extends SrvBase {
                 $connection->send($taskWorker->id); //返回进程id
             };
             $taskWorker->onMessage = function ($connection, $data) use ($taskWorker) {
-                $data = unserialize($data);
-                $ret = null;
                 if($this->server->onTask){
-                    call_user_func($this->server->onTask, $taskWorker->id, $this->server->id, $data);
+                    call_user_func($this->server->onTask, $taskWorker->id, $this->server->id, unserialize($data));
                 }
             };
             //$taskWorker->listen();
@@ -513,17 +511,6 @@ class WorkerManSrv extends SrvBase {
     }
     public function task($data){
         //创建异步任务连接
-        #echo 'init task conn',PHP_EOL;
-        #$taskConn = new \Workerman\Connection\TcpConnection(stream_socket_client( "tcp://".self::$taskAddr));
-        #$taskConn->protocol = '\Workerman\Protocols\Frame';
-       /* $taskConn = new \Workerman\Connection\AsyncTcpConnection('frame://'.self::$taskAddr);
-        $taskConn->taskId = false;
-        $taskConn->onMessage = function ($connection, $data) use(&$taskConn){
-            $taskConn->taskId = $data;
-        };
-        $taskConn->send(serialize($data));
-        $taskConn->connect();*/
-
         $fp = stream_socket_client("tcp://".self::$taskAddr, $errno, $errstr, 1);
         if (!$fp) {
             #echo "$errstr ($errno)",PHP_EOL;
