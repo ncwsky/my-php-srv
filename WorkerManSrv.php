@@ -62,7 +62,6 @@ class WorkerManSrv extends SrvBase {
     private $runLock = ''; #用于判定重载onStart处理
     public function __construct($config){
         parent::__construct($config);
-        self::$_SERVER = $_SERVER; //存放初始的$_SERVER
         $this->pidFile = $this->getConfig('setting.pidFile', $this->runDir .'/server.pid');
         $this->runLock = $this->runDir.'/runLock';
     }
@@ -75,6 +74,7 @@ class WorkerManSrv extends SrvBase {
         $worker_id = $worker->id;
         $this->server->worker_id = $worker_id;
         $this->initMyPhp();
+        self::$_SERVER = $_SERVER; //存放初始的$_SERVER
         #Worker::safeEcho("init myphp:".$worker_id.PHP_EOL);
         if($worker_id==0){
             Worker::safeEcho("run dir:".$this->runDir.PHP_EOL);
