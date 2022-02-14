@@ -521,6 +521,7 @@ class WorkerManSrv extends SrvBase {
             $send_data = serialize($data);
             $len = strlen($send_data)+4;
             $send_data = pack('N', $len) . $send_data;
+            //stream_set_blocking($fp, false);
             if(!fwrite($fp, $send_data, $len)){
                 $taskId = false;
             }
