@@ -1,4 +1,21 @@
 <?php
+/**
+ * 示例
+ * 在onWorkerStart定时心跳空闲定时时间常量或直接在ConnLifetimeTimer::instance(传入定时)
+ * define('CONN_HEARTBEAT_TIME', 3); //连接心跳时间 0不检测
+ * define('CONN_MAX_IDLE_TIME', 9);  //连接最大空闲时间 0不限制
+ * 在onMessage及onTask回调内
+$lifetimeTimer = ConnLifetimeTimer::instance();
+$lifetimeTimer->onHeartbeat = function () { //间隔数据库连接检测
+    db()->getOne('select 1'); //断连会自动重连一次
+    redis()->ping();
+};
+$lifetimeTimer->onIdle = function () { //空闲释放
+    Db::free();
+    redis()::free();
+};
+$lifetimeTimer->run();
+ */
 
 /**
  * 连接存活定时器
@@ -10,7 +27,6 @@ class ConnLifetimeTimer
     protected $timerMs = 0; //定时 毫秒
     protected $maxTime = 0;
     protected $microtime = 0;
-    protected $server = null;
     protected $isIdle = false;
     protected $timerId = 0;
     protected static $instance;
@@ -24,10 +40,10 @@ class ConnLifetimeTimer
      */
     public $onIdle = null;
 
-    public static function instance($server, $heartbeat_time = 0, $max_idle_time = 0)
+    public static function instance($heartbeat_time = 0, $max_idle_time = 0)
     {
         if (!self::$instance) {
-            self::$instance = new self($server, $heartbeat_time, $max_idle_time);
+            self::$instance = new self($heartbeat_time, $max_idle_time);
         }
 
         return self::$instance;
@@ -35,17 +51,15 @@ class ConnLifetimeTimer
 
     /**
      * ConnLifetimeTimer constructor.
-     * @param Worker2|swoole_server $server
      * @param int $heartbeat_time
      * @param int $max_idle_time
      */
-    public function __construct($server, $heartbeat_time = 0, $max_idle_time = 0)
+    public function __construct($heartbeat_time = 0, $max_idle_time = 0)
     {
         //存活心跳定时 允许最大空闲定时
         if ($heartbeat_time == 0) $heartbeat_time = defined('CONN_HEARTBEAT_TIME') ? CONN_HEARTBEAT_TIME : 0;
         if ($max_idle_time == 0) $max_idle_time = defined('CONN_MAX_IDLE_TIME') ? CONN_MAX_IDLE_TIME : 0;
 
-        $this->server = $server;
         $this->heartbeat_time = (int)$heartbeat_time;
         $this->max_idle_time = (int)$max_idle_time;
 
@@ -56,6 +70,8 @@ class ConnLifetimeTimer
 
     public function run()
     {
+        if ($this->timerMs <= 0) return; //未配置定时时间
+
         $this->isIdle = false;
         $this->microtime = microtime(true);
 
@@ -77,11 +93,9 @@ class ConnLifetimeTimer
 
     protected function runTimer()
     {
-        if ($this->timerMs <= 0) return; //未配置定时时间
+        if (SrvBase::$isConsole) echo date("Y-m-d H:i:s") . ' worker:' . SrvBase::$instance->server->worker_id . ' timer start ' . PHP_EOL;
 
-        if (SrvBase::$isConsole) echo date("Y-m-d H:i:s") . ' worker:' . $this->server->worker_id . ' timer start ' . PHP_EOL;
-
-        $this->timerId = $this->server->tick($this->timerMs, function () {
+        $this->timerId = SrvBase::$instance->server->tick($this->timerMs, function () {
             //if (SrvBase::$isConsole) echo '-----> timer ' . microtime(true) . PHP_EOL;
             //if ($this->microtime == 0) return; //该进程没有任何请求
 
@@ -90,28 +104,37 @@ class ConnLifetimeTimer
             if ($diff >= $this->maxTime) { //更新触发时间
                 $this->microtime = $now_microtime;
             }
+            $max_idle_time = $this->max_idle_time;
+            $onIdle = $this->onIdle;
             //存活检查
             try {
                 if ($this->heartbeat_time > 0 && $this->onHeartbeat !== null && $diff >= $this->heartbeat_time) {
-                    call_user_func($this->onHeartbeat, $this);
+                    call_user_func($this->onHeartbeat);
 
-                    $msg = date("Y-m-d H:i:s") . ' worker:' . $this->server->worker_id . ' heartbeat ';
+                    $msg = date("Y-m-d H:i:s") . ' worker:' . SrvBase::$instance->server->worker_id . ' heartbeat ';
                     if (SrvBase::$isConsole) echo $msg . PHP_EOL;
                 }
             } catch (Exception $e) {
-                Log::write($e->getMessage(), 'onHeartbeat');
+                Log::write($e->getMessage(), 'onHeartbeat1');
+                //用于清除定时
+                $max_idle_time = 1;
+                if ($onIdle === null) $onIdle = function () {};
+            } catch (Error $e) {
+                Log::write($e->getMessage(), 'onHeartbeat2');
+                $max_idle_time = 1;
+                if ($onIdle === null) $onIdle = function () {};
             }
             //空闲处理
             try {
-                if ($this->max_idle_time > 0 && $this->onIdle !== null && $diff >= $this->max_idle_time) {
-                    call_user_func($this->onIdle, $this);
+                if ($max_idle_time > 0 && $onIdle !== null && $diff >= $max_idle_time) {
+                    call_user_func($onIdle);
                     $this->isIdle = true;
 
-                    $msg = date("Y-m-d H:i:s") . ' worker:' . $this->server->worker_id . ' onIdle to close, timer:' . $this->timerId . ' to clear';
+                    $msg = date("Y-m-d H:i:s") . ' worker:' . SrvBase::$instance->server->worker_id . ' onIdle to close, timer:' . $this->timerId . ' to clear';
                     if (SrvBase::$isConsole) echo $msg . PHP_EOL;
                     //else Log::write($msg, 'onIdle');
 
-                    $this->server->clear($this->timerId); //空闲时清除定时器
+                    SrvBase::$instance->server->clear($this->timerId); //空闲时清除定时器
                     $this->timerId = 0;
                 }
             } catch (Exception $e) {
