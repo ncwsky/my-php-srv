@@ -46,14 +46,15 @@ class SwooleEvent{
         // 可在myphp::Run之前加上 用于post不指定url时通过post数据判断ca
         //if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
         //if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
-        if (Q('async%d')==1) { //异步任务
-            $task_id = SwooleSrv::$instance->task([
+        if (SrvBase::$instance->task_worker_num && isset($_REQUEST[ASYNC_NAME]) && $_REQUEST[ASYNC_NAME]==1) { //异步任务
+            $task_id = SrvBase::$instance->task([
                 '_COOKIE'=>$_COOKIE,
                 '_FILES'=>$_FILES,
                 '_GET'=>$_GET,
                 '_POST'=>$_POST,
                 '_REQUEST'=>$_REQUEST,
                 '_SERVER'=>$_SERVER,
+                'header'=>$request->header,
                 'rawBody'=>$request->rawContent()
             ]);
             if($task_id===false){
@@ -63,7 +64,7 @@ class SwooleEvent{
             }
         } else {
             myphp::setEnv('headers', $request->header);
-            myphp::setEnv('rawBody', $request->rawContent()); //file_get_contents("php://input")
+            myphp::setRawBody($request->rawContent()); //file_get_contents("php://input")
             myphp::Run(function($code, $data, $header) use($response){
                 if($header) {
                     foreach ($header as $name => $val) {
@@ -77,9 +78,6 @@ class SwooleEvent{
                     $response->write(toJson($data));
                 }
             }, false);
-            //清除本次请求的数据
-            myphp::setEnv('headers');
-            myphp::setEnv('rawBody');
         }
         $response->end();
     }
@@ -92,12 +90,11 @@ class SwooleEvent{
         $_POST = $data['_POST'];
         $_REQUEST = $data['_REQUEST'];
         $_SERVER = $data['_SERVER'];
-        myphp::setEnv('rawBody', $data['rawBody']);
-        myphp::Run(function($code, $data, $header) use($task_id){
-            if(SwooleSrv::$isConsole) echo "AsyncTask Finish:Connect.task_id=" . $task_id . (is_string($data) ? $data : toJson($data)). PHP_EOL;
+        myphp::setRawBody($data['rawBody']);
+        myphp::Run(function($code, $data, $header) use($task_id, $src_worker_id){
+            if (SrvBase::$isConsole) SrvBase::safeEcho("AsyncTask Finish:Connect.task_id=" . $task_id . ',src_worker_id=' . $src_worker_id . ', ' . (is_string($data) ? $data : toJson($data)) . PHP_EOL);
         }, false);
         unset($_COOKIE, $_FILES, $_GET, $_POST, $_REQUEST, $_SERVER);
-        myphp::setEnv('rawBody'); //清除数据
         //return 等同$server->finish($response); 这里没有return不会触发finish事件
     }
     //异步任务完成 当worker进程投递的任务在task_worker中完成时，task进程会通过swoole_server->finish()方法将任务处理的结果发送给worker进程

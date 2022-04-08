@@ -1,26 +1,11 @@
 <?php
 class SwooleHttpSrv extends SwooleSrv {
-    public function __construct($config)
+    //初始服务之前执行
+    protected function beforeInit()
     {
-        parent::__construct($config);
+        //BASE模式下Manager进程是可选的，当设置了worker_num=1，并且没有使用Task和MaxRequest特性时，底层将直接创建一个单独的Worker进程，不创建Manager进程
         $this->config['type'] = self::TYPE_HTTP;
         $this->mode = SWOOLE_BASE; //单线程模式 异步非阻塞Server同nginx https://wiki.swoole.com/wiki/page/353.html
-    }
-    //绑定事件
-    protected function afterInit(){
-        $server = $this->server;
-
-        if ($this->getConfig('setting.task_worker_num', 0)) { //启用了
-            $server->on('Task', function (swoole_server $server, int $task_id, int $src_worker_id, mixed $data){
-                SwooleEvent::onTask($server, $task_id, $src_worker_id, $data);
-            });
-            $server->on('Finish', function (swoole_server $server, int $task_id, string $data){
-                SwooleEvent::onFinish($server, $task_id, $data);
-            });
-        }
-        #$server->on('Request', ['SwooleEvent','onRequest']);
-        $server->on('Request', function ($request, $response){
-            SwooleEvent::onRequest($request, $response);
-        });
+        self::$isHttp = true;
     }
 }

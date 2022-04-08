@@ -93,10 +93,7 @@ class ConnLifetimeTimer
 
     protected function runTimer()
     {
-        if (SrvBase::$isConsole) echo date("Y-m-d H:i:s") . ' worker:' . SrvBase::$instance->server->worker_id . ' timer start ' . PHP_EOL;
-
         $this->timerId = SrvBase::$instance->server->tick($this->timerMs, function () {
-            //if (SrvBase::$isConsole) echo '-----> timer ' . microtime(true) . PHP_EOL;
             //if ($this->microtime == 0) return; //该进程没有任何请求
 
             $now_microtime = microtime(true);
@@ -112,7 +109,7 @@ class ConnLifetimeTimer
                     call_user_func($this->onHeartbeat);
 
                     $msg = date("Y-m-d H:i:s") . ' worker:' . SrvBase::$instance->server->worker_id . ' heartbeat ';
-                    if (SrvBase::$isConsole) echo $msg . PHP_EOL;
+                    if (SrvBase::$isConsole) SrvBase::safeEcho($msg . PHP_EOL);
                 }
             } catch (Exception $e) {
                 Log::write($e->getMessage(), 'onHeartbeat1');
@@ -131,15 +128,17 @@ class ConnLifetimeTimer
                     $this->isIdle = true;
 
                     $msg = date("Y-m-d H:i:s") . ' worker:' . SrvBase::$instance->server->worker_id . ' onIdle to close, timer:' . $this->timerId . ' to clear';
-                    if (SrvBase::$isConsole) echo $msg . PHP_EOL;
+                    if (SrvBase::$isConsole) SrvBase::safeEcho($msg . PHP_EOL);
                     //else Log::write($msg, 'onIdle');
 
-                    SrvBase::$instance->server->clear($this->timerId); //空闲时清除定时器
+                    SrvBase::$instance->server->clearTimer($this->timerId); //空闲时清除定时器
                     $this->timerId = 0;
                 }
             } catch (Exception $e) {
                 Log::write($e->getMessage(), 'onIdle');
             }
         });
+
+        if (SrvBase::$isConsole) SrvBase::safeEcho(date("Y-m-d H:i:s") . ' worker:' . SrvBase::$instance->server->worker_id . ' timer '.$this->timerId.' start ' . PHP_EOL);
     }
 }

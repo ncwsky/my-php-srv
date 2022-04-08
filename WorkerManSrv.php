@@ -2,7 +2,12 @@
 use Workerman\Worker;
 use Workerman\Lib\Timer;
 use Workerman\Connection\ConnectionInterface;
-//增加定时处理的tick、after方法
+
+/**
+ * Class Worker2
+ * 增加定时处理的tick、after方法
+ * @method void reload() 用于提示
+ */
 class Worker2 extends Worker{
     public $port = '';
     public $type = 'tcp';
@@ -33,7 +38,7 @@ class Worker2 extends Worker{
      * @param $timer_id
      * @return bool
      */
-    public function clear($timer_id){
+    public function clearTimer($timer_id){
         return Timer::del($timer_id);
     }
 
@@ -46,12 +51,8 @@ class Worker2 extends Worker{
 }
 
 class WorkerManSrv extends SrvBase {
-    public static $_SERVER;
     public $isWorkerMan = true;
-    /**
-     * @var Worker2 $server
-     */
-    public $server;
+    public $max_request = 0;
     public static $workers = null; //记录所有进程
     public static $taskWorker = null;
     public static $taskAddr = '';
@@ -64,6 +65,7 @@ class WorkerManSrv extends SrvBase {
         parent::__construct($config);
         $this->pidFile = $this->getConfig('setting.pidFile', $this->runDir .'/server.pid');
         $this->runLock = $this->runDir.'/runLock';
+        $this->max_request = $this->getConfig('setting.max_request', 0);
     }
     /** 此事件在Worker进程启动时发生 这里创建的对象可以在进程生命周期内使用 如mysql/redis...
      * @param Worker2 $worker
@@ -75,14 +77,11 @@ class WorkerManSrv extends SrvBase {
         $this->server->worker_id = $worker_id;
         $this->initMyPhp();
         self::$_SERVER = $_SERVER; //存放初始的$_SERVER
-        #Worker::safeEcho("init myphp:".$worker_id.PHP_EOL);
+
         if($worker_id==0){
             Worker::safeEcho("run dir:".$this->runDir.PHP_EOL);
-            self::$isConsole && Worker::safeEcho(json_encode($_SERVER).PHP_EOL);
+            //self::$isConsole && Worker::safeEcho(json_encode($_SERVER).PHP_EOL);
         }
-        /*myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
-            #echo "init myphp:".$worker_id, PHP_EOL;
-        }, false);*/
         if($this->getConfig('timer_file')){
             //定时载入
             $timer = new WorkerManTimer();
@@ -104,7 +103,7 @@ class WorkerManSrv extends SrvBase {
     final public function _onWorkerStop(Worker2 $worker){
         $worker_id = $worker->id;
         if (!$worker->isTask) { //worker进程  异常结束后执行的逻辑
-            echo 'Worker Stop clear' . PHP_EOL;
+            Worker::safeEcho('Worker Stop clear' . PHP_EOL);
             $timer = new WorkerManTimer();
             $timer->stop($worker_id);
         }
@@ -139,11 +138,11 @@ class WorkerManSrv extends SrvBase {
             unset($this->config['setting']['logFile']);
         }
         $context = $this->getConfig('context', []); //资源上下文
-        if($this->getConfig('setting.task_worker_num', 0)) {
+        if($this->task_worker_num) {
             //创建进程通信服务
             $this->chainWorker();
         }
-
+        $unixFiles = [];
         //监听1024以下的端口需要root权限
         switch ($this->getConfig('type')){
             case self::TYPE_HTTP:
@@ -157,6 +156,13 @@ class WorkerManSrv extends SrvBase {
             case self::TYPE_UDP:
                 $this->server = new Worker2(self::TYPE_UDP.'://'.$this->ip.':'.$this->port, $context);
                 $this->server->type = self::TYPE_UDP;
+                break;
+            case self::TYPE_UNIX:
+                $this->ip = (is_dir('/dev/shm') ? '/dev/shm' : $this->runDir) . '/' . $this->serverName() . $this->ip;
+
+                $this->server = new Worker2(self::TYPE_UNIX.'://'.$this->ip, $context);
+                $this->server->type = self::TYPE_UNIX;
+                $unixFiles[] = $this->ip;
                 break;
             default:
                 $this->server = new Worker2(self::TYPE_TCP.'://'.$this->ip.':'.$this->port, $context);
@@ -236,16 +242,28 @@ class WorkerManSrv extends SrvBase {
         if(is_array($listen) && $listen){
             $port = (int)$this->port;
             foreach ($listen as $k=>$item){
-                if(!isset($item['ip'])){ //未设置使用主服务器的
+                if (!isset($item['type']) || !in_array($item['type'], SrvBase::$types)) $item['type'] = self::TYPE_TCP; // Socket 类型
+                if ($item['type'] == self::TYPE_UNIX) {
+                    if(!isset($item['ip'])){
+                        $item['ip'] = $k;
+                    }
+                    $item['ip'] = (is_dir('/dev/shm') ? '/dev/shm' : $this->runDir) . '/' . $this->serverName() . $item['ip'];
+
+                    if (file_exists($item['ip']) && file_exists($this->runLock) && @file_get_contents($this->runLock) === '0') {
+                        @unlink($item['ip']);
+                    }
+                    $unixFiles[] = $item['ip'];
+                }
+
+                if (!isset($item['ip'])) { //未设置使用主服务器的
                     $item['ip'] = $this->ip;
                 }
                 if(!isset($item['port'])){ //未设置使用主服务器的 port+10
                     $item['port'] = ++$port;
                 }
-                if(!isset($item['type']) || !in_array($item['type'], SrvBase::$types)) $item['type'] = self::TYPE_TCP; // Socket 类型
 
                 //创建其他监听服务
-                $this->childSrv[$k] = new Worker2($item['type'] . '://' . $item['ip'] . ':' . $item['port'], empty($item['context']) ? [] : $item['context']);
+                $this->childSrv[$k] = new Worker2($item['type'] . '://' . $item['ip'] . ($item['type'] == self::TYPE_UNIX ? '' : ':' . $item['port']), empty($item['context']) ? [] : $item['context']);
                 /**
                  * @var Worker2 $childSrv;
                  */
@@ -300,7 +318,7 @@ class WorkerManSrv extends SrvBase {
             }
         }
         $server->onTask = null;
-        if ($this->getConfig('setting.task_worker_num', 0) && !self::$taskWorker) { //启用了
+        if ($this->task_worker_num && !self::$taskWorker) { //启用了
             $server->onTask = function ($task_id, $src_worker_id, $data) use ($event){
                 if (isset($event['onTask'])) {
                     call_user_func($event['onTask'], $task_id, $src_worker_id, $data);
@@ -318,7 +336,7 @@ class WorkerManSrv extends SrvBase {
             $taskWorker->isTask = true;
             $taskWorker->user = $this->getConfig('setting.user', '');
             $taskWorker->name = $server->name.'_task';
-            $taskWorker->count = $this->getConfig('setting.task_worker_num', 0); #unix://不支持多worker进程
+            $taskWorker->count = $this->task_worker_num; #unix://不支持多worker进程
             //初始进程事件绑定
             $taskWorker->onWorkerStart = [$this, 'childWorkerStart'];
             if(!$this->getConfig('setting.reloadable', true)) { //不自动重启进程的reload处理
@@ -331,22 +349,39 @@ class WorkerManSrv extends SrvBase {
                 $connection->send($taskWorker->id); //返回进程id
             };
             $taskWorker->onMessage = function ($connection, $data) use ($taskWorker) {
+                static $request_count = 0;
                 if($this->server->onTask){
-                    call_user_func($this->server->onTask, $taskWorker->id, $this->server->id, unserialize($data));
+                    $src_worker_id = unpack('n', $data)[1];
+                    $data = unserialize(substr($data, 2));
+                    call_user_func($this->server->onTask, $taskWorker->id, $src_worker_id, $data);
+                    // 请求数达到xxx后退出当前进程，主进程会自动重启一个新的进程
+                    if ($this->max_request > 0 && ++$request_count > $this->max_request) {
+                        Worker::stopAll();
+                    }
                 }
             };
             //$taskWorker->listen();
             self::$taskWorker = $taskWorker;
         }
 
-        Worker::$onMasterReload = function (){
+        Worker::$onMasterReload = function () use($unixFiles){
+            //清除unix-sock文件
+            foreach ($unixFiles as $sockFile){
+                file_exists($sockFile) && @unlink($sockFile);
+            }
+
             self::$chainSocketFile && file_exists(self::$chainSocketFile) && @unlink(self::$chainSocketFile);
         };
         #结束时销毁处理
-        Worker::$onMasterStop = function (){
+        Worker::$onMasterStop = function () use($unixFiles){
             if(method_exists($this, 'onStop')){
                 !$this->hasInitMyPhp && $this->initMyPhp();
                 $this->onStop();
+            }
+
+            //清除unix-sock文件
+            foreach ($unixFiles as $sockFile){
+                file_exists($sockFile) && @unlink($sockFile);
             }
 
             file_exists($this->runLock) && @unlink($this->runLock);
@@ -357,7 +392,7 @@ class WorkerManSrv extends SrvBase {
     public static $remoteConnection = null;
     //连接到内部通信服务
     protected function chainConnection(Worker2 $worker){
-        if(!$this->getConfig('setting.task_worker_num', 0)) return;
+        if(!$this->task_worker_num) return;
 
         //生成唯一id
         $uniqid = self::workerToUniqId($worker->port, $worker->id);
@@ -390,16 +425,13 @@ class WorkerManSrv extends SrvBase {
     public function childWorkerStart(Worker2 $worker){
         $this->chainConnection($worker);
 
-        $worker_id = $worker->id;
         $this->initMyPhp();
-        #Worker::safeEcho("childWorker init myphp:".$worker_id.PHP_EOL);
-        /*myphp::Run(function($code, $data, $header) use($worker_id){ #载入APP_PATH下的control
-            #echo "init myphp:".$worker_id, PHP_EOL;
-        }, false);*/
+        self::$_SERVER = $_SERVER; //存放初始的$_SERVER
+        #Worker::safeEcho("childWorker init myphp:".$worker->id.PHP_EOL);
     }
     //创建进程通信服务
     public function chainWorker(){
-        $socketFile = (is_dir('/dev/shm') ? '/dev/shm/' : $this->runDir) . '/' . $this->serverName() . '_chain.sock';
+        $socketFile = (is_dir('/dev/shm') ? '/dev/shm' : $this->runDir) . '/' . $this->serverName() . '_chain.sock';
         if(file_exists($socketFile) && file_exists($this->runLock) && @file_get_contents($this->runLock)==='0'){
             @unlink($socketFile);
         }
@@ -416,7 +448,7 @@ class WorkerManSrv extends SrvBase {
                 case 'to': //指定转发 fd workerid
                     $client = self::uniqIdToClient($data['fd']);
                     if(!$client) {
-                        echo 'fd:'.$data['fd'].' is invalid.',PHP_EOL;
+                        Worker::safeEcho('fd:'.$data['fd'].' is invalid.'.PHP_EOL);
                         return;
                     }
                     $uniqid = self::workerToUniqId($client['local_port'], $client['worker_id']);
@@ -434,9 +466,9 @@ class WorkerManSrv extends SrvBase {
                     $chainData = self::uniqIdToWorker($data['uniqid']);
                     $msg = 'chain reg from ';
                     if($chainData){
-                        echo $msg,'local_port:'.$chainData['local_port'].', self_id:'.$chainData['self_id'],PHP_EOL;
+                        Worker::safeEcho($msg,'local_port:'.$chainData['local_port'].', self_id:'.$chainData['self_id'].PHP_EOL);
                     }else{
-                        echo $msg.'fail',PHP_EOL,PHP_EOL;
+                        Worker::safeEcho($msg.'fail'.PHP_EOL.PHP_EOL);
                     }
                     break;
             }
@@ -447,7 +479,7 @@ class WorkerManSrv extends SrvBase {
     //通道通信
     public static function chainTo(Worker2 $worker, $fd, $data){
         $data = ['a'=>$fd===-1?'all':'to','fd'=>$fd, 'raw'=>$data];
-        echo PHP_EOL, 'workerId:'.$worker->id.', name:'.$worker->name.', port:'.$worker->port.', chain:'.( self::$remoteConnection ? 'has':'no'),PHP_EOL, PHP_EOL;
+        Worker::safeEcho(PHP_EOL. 'workerId:'.$worker->id.', name:'.$worker->name.', port:'.$worker->port.', chain:'.( self::$remoteConnection ? 'has':'no').PHP_EOL. PHP_EOL);
         self::$remoteConnection->send(serialize($data)); //内部通信-消息转发
     }
     /**
@@ -510,24 +542,23 @@ class WorkerManSrv extends SrvBase {
         return $this->server->id;
     }
     public function task($data){
-        //创建异步任务连接
-        $fp = stream_socket_client("tcp://".self::$taskAddr, $errno, $errstr, 1);
+        //if (!$this->task_worker_num) return null;
+        $fp = stream_socket_client("tcp://" . self::$taskAddr, $errno, $errstr, 1);
         if (!$fp) {
-            #echo "$errstr ($errno)",PHP_EOL;
             self::err("$errstr ($errno)");
             return false;
-        } else {
-            $taskId = (int)substr(fread($fp, 10),4);
-            $send_data = serialize($data);
-            $len = strlen($send_data)+4;
-            $send_data = pack('N', $len) . $send_data;
-            //stream_set_blocking($fp, false);
-            if(!fwrite($fp, $send_data, $len)){
-                $taskId = false;
-            }
-            fclose($fp);
-            return $taskId;
         }
+        //stream_set_blocking($fp, false); //非阻塞模式
+        $worker_id = $this->server->id;
+        $taskId = (int)substr(fread($fp, 10),4);
+        $send_data = serialize($data);
+        $len = 4 + 2 + strlen($send_data);
+        $send_data = pack('N', $len) . pack('n', $worker_id) . $send_data;
+        if(!fwrite($fp, $send_data, $len)){
+            $taskId = false;
+        }
+        fclose($fp);
+        return $taskId;
     }
     public function send($fd, $data){
         $connection = $this->getConnection($fd);
@@ -564,6 +595,32 @@ class WorkerManSrv extends SrvBase {
             ];
         }
         return null;
+    }
+
+    public function getHeader($req){
+        return is_array($req) ? $req['header'] : $req->header();
+    }
+    public function getRawBody($req){
+        return is_array($req) ? $req['rawbody'] : $req->rawBody();
+    }
+    /**
+     * @param TcpConnection $connection
+     * @param $code
+     * @param $header
+     * @param $content
+     */
+    public function httpSend($connection, $code, &$header, &$content){
+        // 发送状态码
+        $response = new \Workerman\Protocols\Http\Response($code);
+        // 发送头部信息
+        $response->withHeaders($header);
+        // 发送内容
+        if (is_string($content)) {
+            $content !== '' && $response->withBody($content);
+        } else {
+            $response->withBody(Helper::toJson($content));
+        }
+        $connection->send($response);
     }
     final public function exec(){
         foreach ($this->childSrv as $childSrv){ //继承主服务
@@ -627,31 +684,6 @@ class WorkerManSrv extends SrvBase {
                 break;
             default:
                 $this->start();
-/*            case 'reload':
-                $this->reload(SIGUSR1);
-                break;
-            case 'stop':
-                $this->stop(SIGINT);
-                break;
-            case 'restart':
-                $this->stop(SIGINT);
-                echo "Start ".$this->serverName(),PHP_EOL;
-                $this->start();
-                break;
-            case 'status':
-                $this->start();
-                break;
-            case 'start':
-                if($this->pid()){
-                    echo $this->pidFile." exists, ".$this->serverName()." is already running or crashed.",PHP_EOL;
-                    exit();
-                }else{
-                    echo "Start ".$this->serverName(),PHP_EOL;
-                }
-                $this->start();
-                break;
-            default:
-                echo 'Usage: '. $this->runFile .' {([--console]|start[--console])|stop|restart[--console]|reload|relog|status}',PHP_EOL;*/
         }
     }
 }

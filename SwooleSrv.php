@@ -14,20 +14,35 @@ class SwooleSrv extends SrvBase {
     {
         parent::__construct($config);
         $this->mode = $mode;
+        $config = &$this->config;
+        //兼容处理
+        if (isset($config['setting']['pidFile'])) {
+            $config['setting']['pid_file'] = $config['setting']['pidFile'];
+            unset($config['setting']['pidFile']);
+        }
+        if (isset($config['setting']['logFile'])) {
+            $config['setting']['log_file'] = $config['setting']['logFile'];
+            unset($config['setting']['logFile']);
+        }
+        if (isset($config['setting']['count'])) {
+            $config['setting']['worker_num'] = $config['setting']['count'];
+            unset($config['setting']['count']);
+        }
+        unset($config['setting']['stdoutFile'], $config['setting']['protocol']);
+        $this->pidFile = $this->getConfig('setting.pid_file', $this->runDir . '/server.pid');
     }
     //此事件在Server正常结束时发生
     public function onShutdown(swoole_server $server){
-        echo $this->serverName().' shutdown '.date("Y-m-d H:i:s"). PHP_EOL;
+        static::safeEcho($this->serverName().' shutdown '.date("Y-m-d H:i:s"). PHP_EOL);
     }
     //管理进程 这里载入了php会造成与worker进程里代码冲突
     public function _onManagerStart(swoole_server $server){
         $this->setProcessTitle($this->serverName() . '-manager');
-
-        echo $this->serverName().' ver'.$this->getConfig('ver','1.0.0') .', swoole'. SWOOLE_VERSION .' start '.date("Y-m-d H:i:s"). PHP_EOL;
-        echo $this->address,PHP_EOL;
-        echo 'master pid:' . $server->master_pid . PHP_EOL;
-        echo 'manager pid:' . $server->manager_pid . PHP_EOL;
-        echo 'run dir:'. $this->runDir . PHP_EOL;
+        static::safeEcho($this->serverName().', swoole'. SWOOLE_VERSION .' start '.date("Y-m-d H:i:s"). PHP_EOL);
+        static::safeEcho($this->address.PHP_EOL);
+        static::safeEcho('master pid:' . $server->master_pid . PHP_EOL);
+        static::safeEcho('manager pid:' . $server->manager_pid . PHP_EOL);
+        static::safeEcho('run dir:'. $this->runDir . PHP_EOL);
 
         if(method_exists($this, 'onManagerStart')){
             $this->onManagerStart($server);
@@ -35,7 +50,7 @@ class SwooleSrv extends SrvBase {
     }
     //当管理进程结束时调用它
     public function _onManagerStop(swoole_server $server){
-        echo 'manager pid:' . $server->manager_pid . ' end' . PHP_EOL;
+        static::safeEcho('manager pid:' . $server->manager_pid . ' end' . PHP_EOL);
 
         if(method_exists($this, 'onManagerStop')){
             $this->onManagerStop($server);
@@ -53,23 +68,20 @@ class SwooleSrv extends SrvBase {
      */
     final public function _onWorkerStart($server, $worker_id){
         $this->initMyPhp();
+        self::$_SERVER = $_SERVER; //存放初始的$_SERVER
+
         if (!$server->taskworker) { //worker进程
-            #Config::set('APP_ROOT', dirname($_SERVER['SCRIPT_NAME'])); //重置app_root目录
-            #echo "init myphp:".$worker_id, PHP_EOL;
             if($worker_id==0) {
-                echo "run dir:".$this->runDir.PHP_EOL;
-                if(self::$isConsole) echo json_encode($_SERVER).PHP_EOL;
+                self::$isConsole && static::safeEcho("run dir:".$this->runDir.PHP_EOL);
+                //if(self::$isConsole) static::safeEcho(json_encode($_SERVER).PHP_EOL);
             }
-/*            myphp::Run(function($code, $data, $header) use($worker_id){
-                #echo "init myphp:".$worker_id, PHP_EOL;
-            }, false);*/
             if($this->getConfig('timer_file')){
                 //定时载入
                 $timer = new SwooleTimer();
                 $timer->start($worker_id);
             }
         } else { //task进程
-            //echo 'task worker:'.$worker_id.PHP_EOL;
+
         }
 
         if ($worker_id >= $server->setting['worker_num']) {
@@ -88,7 +100,7 @@ class SwooleSrv extends SrvBase {
      */
     final public function _onWorkerStop($server, $worker_id){
         if (!$server->taskworker) { //worker进程  异常结束后执行的逻辑
-            echo 'Worker Stop clear' . PHP_EOL;
+            static::safeEcho('Worker Stop clear' . PHP_EOL);
             $timer = new SwooleTimer();
             $timer->stop($worker_id);
         }
@@ -118,7 +130,7 @@ class SwooleSrv extends SrvBase {
      */
     final public function _onWorkerError(swoole_server $server, $worker_id, $worker_pid, $exit_code, $signal){
         $err = '异常进程的编号:'.$worker_id.', 异常进程的ID:'.$worker_pid.', 退出的状态码:'.$exit_code.', 进程退出信号:'.$signal;
-        echo $err,PHP_EOL;
+        static::safeEcho($err.PHP_EOL);
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
         self::err($err);
         $this->onWorkerError($server, $worker_id, $err);
@@ -137,21 +149,26 @@ class SwooleSrv extends SrvBase {
         switch ($type){
             case self::TYPE_HTTP:
                 $this->server = new swoole_http_server($this->ip, $this->port, $this->mode, $sockType);
-                $this->address = self::TYPE_HTTP;
+                $this->server->type = self::TYPE_HTTP;
                 break;
             case self::TYPE_WEB_SOCKET:
                 $this->server = new swoole_websocket_server($this->ip, $this->port, $this->mode, $sockType);
-                $this->address = self::TYPE_WEB_SOCKET;
+                $this->server->type = self::TYPE_WEB_SOCKET;
                 break;
             case self::TYPE_UDP:
                 $this->server = new swoole_server($this->ip, $this->port, $this->mode, $isSSL ? SWOOLE_SOCK_UDP | SWOOLE_SSL : SWOOLE_SOCK_UDP);
-                $this->address = self::TYPE_UDP;
+                $this->server->type = self::TYPE_UDP;
+                break;
+            case self::TYPE_UNIX:
+                $this->ip = (is_dir('/dev/shm') ? '/dev/shm' : $this->runDir) . '/' . $this->serverName() . $this->ip;
+                $this->server = new swoole_server($this->ip, 0, $this->mode, SWOOLE_UNIX_STREAM);
+                $this->server->type = self::TYPE_UNIX;
                 break;
             default:
                 $this->server = new swoole_server($this->ip, $this->port, $this->mode, $sockType);
-                $this->address = self::TYPE_TCP;
+                $this->server->type = self::TYPE_TCP;
         }
-        $this->address .= '://'.$this->ip.':'.$this->port;
+        $this->address = $this->server->type.'://'.$this->ip.':'.$this->port;
         //开启多个监听处理
         $listen = $this->getConfig('listen', []);
         if(is_array($listen) && $listen){
@@ -160,36 +177,75 @@ class SwooleSrv extends SrvBase {
             //取多协议端口复合监听协议名
             $getTypeName = function($type){
                 $ret = [
-                    SWOOLE_SOCK_TCP=>self::TYPE_TCP,
-                    SWOOLE_SOCK_UDP=>self::TYPE_UDP,
-                    SWOOLE_SOCK_TCP6 =>self::TYPE_TCP.'6',
-                    SWOOLE_SOCK_UDP6=>self::TYPE_UDP.'6',
+                    SWOOLE_SOCK_TCP => self::TYPE_TCP,
+                    SWOOLE_SOCK_UDP => self::TYPE_UDP,
+                    SWOOLE_SOCK_TCP6 => self::TYPE_TCP . '6',
+                    SWOOLE_SOCK_UDP6 => self::TYPE_UDP . '6',
+                    SWOOLE_UNIX_STREAM => self::TYPE_UNIX,
                 ];
                 return isset($ret[$type]) ? $ret[$type] : 'null';
             };
             $port = (int)$this->port;
             foreach ($listen as $k=>$item){
+                if(!isset($item['type'])) $item['type'] = SWOOLE_SOCK_TCP; // Socket 类型
+                if (is_string($item['type'])) {
+                    if ($item['type'] == self::TYPE_UDP) {
+                        $item['type'] = SWOOLE_SOCK_UDP;
+                    } elseif ($item['type'] == self::TYPE_UNIX) {
+                        $item['type'] = SWOOLE_UNIX_STREAM;
+                        $item['port'] = 0;
+                        if(!isset($item['ip'])){
+                            $item['ip'] = $k;
+                        }
+                        $item['ip'] = (is_dir('/dev/shm') ? '/dev/shm' : $this->runDir) . '/' . $this->serverName() . $item['ip'];
+                    } else {
+                        $item['type'] = SWOOLE_SOCK_TCP;
+                    }
+                }
+
                 if(!isset($item['ip'])){ //未设置使用主服务器的
                     $item['ip'] = $this->ip;
                 }
                 if(!isset($item['port'])){ //未设置使用主服务器的 port+10
                     $item['port'] = ++$port;
                 }
-                if(!isset($item['type'])) $item['type'] = SWOOLE_SOCK_TCP; // Socket 类型
-                if (is_string($item['type'])) $item['type'] = $item['type'] == self::TYPE_UDP ? SWOOLE_SOCK_UDP : SWOOLE_SOCK_TCP;
+
                 //有配置证书
                 if(isset($item['setting']['ssl_cert_file'])){
                     $item['type'] =  $item['type'] | SWOOLE_SSL;
                 }
+
+                //兼容处理
+                if (isset($item['setting']['count'])) {
+                    $item['setting']['worker_num'] = $item['setting']['count'];
+                    unset($item['setting']['count']);
+                }
+                unset($item['setting']['protocol']);
+
                 //创建其他监听服务
+                /**
+                 * @var \Swoole\Server[];
+                 */
                 $this->childSrv[$k] = $this->server->listen($item['ip'], $item['port'], $item['type']);
                 if(isset($item['setting'])){
                     $this->childSrv[$k]->set($item['setting']);
                 }
                 if(isset($item['event'])){ //有自定义事件
-                    foreach ($item['event'] as $event=>$fun){
-                        if(strpos($event, 'on')===0) $event = substr($event, 2);
-                        $this->childSrv[$k]->on($event, $fun);
+                    foreach ($item['event'] as $event=>$fun){ //onWorkerStart onWorkerStop 设置无效只能继承主主服务器的
+                        if ($event == 'onWorkerStart') {
+                            $this->childSrv[$k]->on('WorkerStart', function ($server, $worker_id) use ($fun) {
+                                $this->initMyPhp();
+                                //self::$_SERVER = $_SERVER; //存放初始的$_SERVER
+                                call_user_func($fun, $server, $worker_id);
+                            });
+                        } elseif ($event == 'onWorkerStop') {
+                            $this->childSrv[$k]->on('onWorkerStop', function ($server, $worker_id) use ($fun) {
+                                call_user_func($fun, $server, $worker_id);
+                            });
+                        } else {
+                            if (strpos($event, 'on') === 0) $event = substr($event, 2);
+                            $this->childSrv[$k]->on($event, $fun);
+                        }
                     }
                 }
                 $this->address .= '; '.$getTypeName($item['type']).'://'.$item['ip'].':'.$item['port'];
@@ -269,7 +325,7 @@ class SwooleSrv extends SrvBase {
             }
         }
 
-        if ($this->getConfig('setting.task_worker_num', 0)) { //启用了
+        if ($this->task_worker_num) { //启用了
             $server->on('Task', function ($server, $task_id, $src_worker_id, $data) use ($event) {
                 if (isset($event['onTask'])) {
                     call_user_func($event['onTask'], $server, $task_id, $src_worker_id, $data);
@@ -321,6 +377,10 @@ class SwooleSrv extends SrvBase {
         return $this->server->task($data);
     }
     public function send($fd, $data){
+        if ($this->server->type === self::TYPE_UDP) {
+            return $this->server->sendto($fd['address'], $fd['port'], $data);
+        }
+
         if(!$this->server->send($fd, $data)){
             $code = $this->server->getLastError();
             $errCode = [
@@ -345,6 +405,33 @@ class SwooleSrv extends SrvBase {
     public function clientInfo($fd){
         return $this->server->getClientInfo($fd);
     }
+    public function getHeader($req){
+        return is_array($req) ? $req['header'] : $req->header;
+    }
+    public function getRawBody($req){
+        return is_array($req) ? $req['rawbody'] : $req->rawContent();
+    }
+    /**
+     * @param swoole_http_response $response
+     * @param $code
+     * @param $header
+     * @param $content
+     */
+    public function httpSend($response, $code, &$header, &$content){
+        // 发送状态码
+        $response->status($code);
+        // 发送头部信息
+        foreach ($header as $name => $val) {
+            $response->header($name, $val);
+        }
+        // 发送内容
+        if (is_string($content)) {
+            $content !== '' && $response->write($content);
+        } else {
+            $response->write(Helper::toJson($content));
+        }
+        $response->end();
+    }
     final public function exec(){
         $this->server->start();
     }
@@ -354,7 +441,7 @@ class SwooleSrv extends SrvBase {
         /*if($pid=self::pid()){
             posix_kill($pid, SIGRTMIN); //34  运行时日志不存在可重新打开日志文件
         }*/
-        echo '['.$logFile.'] relog ok!',PHP_EOL;
+        static::safeEcho('['.$logFile.'] relog ok!'.PHP_EOL);
         return true;
     }
     public function run(&$argv){
@@ -383,7 +470,7 @@ class SwooleSrv extends SrvBase {
                 break;
             case 'restart':
                 $this->stop();
-                echo "Start ".$this->serverName(),PHP_EOL;
+                static::safeEcho("Start ".$this->serverName().PHP_EOL);
                 $this->start();
                 break;
             case 'status':
@@ -391,15 +478,15 @@ class SwooleSrv extends SrvBase {
                 break;
             case 'start':
                 if($this->pid()){
-                    echo $this->pidFile." exists, ".$this->serverName()." is already running or crashed.",PHP_EOL;
+                    static::safeEcho($this->pidFile." exists, ".$this->serverName()." is already running or crashed.".PHP_EOL);
                     exit();
                 }else{
-                    echo "Start ".$this->serverName(),PHP_EOL;
+                    static::safeEcho("Start ".$this->serverName().PHP_EOL);
                 }
                 $this->start();
                 break;
             default:
-                echo 'Usage: '. $this->runFile .' {([--console]|start[--console])|stop|restart[--console]|reload|relog|status}',PHP_EOL;
+                static::safeEcho('Usage: '. $this->runFile .' {([--console]|start[--console])|stop|restart[--console]|reload|relog|status}'.PHP_EOL);
         }
     }
 }
