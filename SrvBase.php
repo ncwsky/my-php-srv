@@ -53,7 +53,7 @@ abstract class SrvBase{
     {
         self::$instance = $this;
         $this->runFile = $_SERVER['SCRIPT_FILENAME'];
-        $this->runDir = dirname($this->runFile);
+        $this->runDir = realpath(dirname($this->runFile));
         $this->config = $config;
         $this->pidFile = $this->getConfig('setting.pid_file', $this->runDir .'/server.pid');
         $this->ip = $this->getConfig('ip', '0.0.0.0');
