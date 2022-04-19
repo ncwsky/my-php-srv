@@ -2,11 +2,8 @@
 ```
 composer require myphps/my-php-srv
 ```
-
-##示例代码
-
-###通过 composer的autolad
-```
+##示例1 通过 composer的autolad
+```php
 #!/usr/bin/env php
 <?php
 $_SERVER['SCRIPT_FILENAME'] = __FILE__; //重置运行
@@ -22,12 +19,9 @@ require __DIR__ . '/vendor/myphps/my-php-srv/Load.php';
 
 $srv = new WorkerManHttpSrv($cfg);
 $srv->run($argv);
-
 ```
-
-
-###或直接通过自带Load.php载入
-```
+##示例2 或直接通过自带Load.php载入
+```php
 #!/usr/bin/env php
 <?php
 $_SERVER['SCRIPT_FILENAME'] = __FILE__; //重置运行
@@ -39,5 +33,4 @@ require __DIR__ . '/../Load.php'; #使用workerman时需要把workerman的目录
 $srv = new WorkerManHttpSrv($cfg);
 $srv->run($argv);
 ```
-
-conf.php是myphp的配置文件
+>conf.php是myphp的配置文件
