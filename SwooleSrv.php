@@ -231,21 +231,10 @@ class SwooleSrv extends SrvBase {
                     $this->childSrv[$k]->set($item['setting']);
                 }
                 if(isset($item['event'])){ //有自定义事件
-                    foreach ($item['event'] as $event=>$fun){ //onWorkerStart onWorkerStop 设置无效只能继承主主服务器的
-                        if ($event == 'onWorkerStart') {
-                            $this->childSrv[$k]->on('WorkerStart', function ($server, $worker_id) use ($fun) {
-                                $this->initMyPhp();
-                                //self::$_SERVER = $_SERVER; //存放初始的$_SERVER
-                                call_user_func($fun, $server, $worker_id);
-                            });
-                        } elseif ($event == 'onWorkerStop') {
-                            $this->childSrv[$k]->on('onWorkerStop', function ($server, $worker_id) use ($fun) {
-                                call_user_func($fun, $server, $worker_id);
-                            });
-                        } else {
-                            if (strpos($event, 'on') === 0) $event = substr($event, 2);
-                            $this->childSrv[$k]->on($event, $fun);
-                        }
+                    foreach ($item['event'] as $event=>$fun){ //onWorkerStart onWorkerStop 设置无效只能继承主服务器的
+                        if (strpos($event, 'on') === 0) $event = substr($event, 2);
+                        if ($event == 'WorkerStart' || $event == 'WorkerStop') continue;
+                        $this->childSrv[$k]->on($event, $fun);
                     }
                 }
                 $this->address .= '; '.$getTypeName($item['type']).'://'.$item['ip'].':'.$item['port'];
