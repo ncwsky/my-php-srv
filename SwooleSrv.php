@@ -129,7 +129,7 @@ class SwooleSrv extends SrvBase {
      * @param int $signal 进程退出的信号
      */
     final public function _onWorkerError(swoole_server $server, $worker_id, $worker_pid, $exit_code, $signal){
-        $err = '异常进程的编号:'.$worker_id.', 异常进程的ID:'.$worker_pid.', 退出的状态码:'.$exit_code.', 进程退出信号:'.$signal;
+        $err = date('Y-m-d H:i:s ') . '异常进程的编号:'.$worker_id.', 异常进程的ID:'.$worker_pid.', 退出的状态码:'.$exit_code.', 进程退出信号:'.$signal;
         static::safeEcho($err.PHP_EOL);
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
         self::err($err);
@@ -383,7 +383,8 @@ class SwooleSrv extends SrvBase {
                 1202=>'发送的数据超过了 server->buffer_output_size 设置',
                 9007=>'仅在使用 dispatch_mode=3 时出现，表示当前没有可用的进程，可以调大 worker_num 进程数量',
             ];
-            self::err(isset($errCode[$code])?$errCode[$code]:'未知错误码', $code); //错误码 参见https://wiki.swoole.com/wiki/page/554.html
+            $err = date('Y-m-d H:i:s ') . (isset($errCode[$code])?$errCode[$code]:'未知错误码');
+            self::err($err, $code); //错误码 参见https://wiki.swoole.com/wiki/page/554.html
             return false;
         }
         return true;

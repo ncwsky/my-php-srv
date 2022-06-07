@@ -111,7 +111,7 @@ class WorkerManSrv extends SrvBase {
     }
     //当客户端的连接上发生错误时触发 参见 http://doc.workerman.net/worker/on-error.html
     final public function _onWorkerError(ConnectionInterface $connection, $code, $msg){
-        $err = '异常进程的ID:'.$connection->worker->id.', 异常连接的ID:'.$connection->id.', code:'.$code.', msg:'.$msg;
+        $err = date('Y-m-d H:i:s ') . '异常进程的ID:'.$connection->worker->id.', 异常连接的ID:'.$connection->id.', code:'.$code.', msg:'.$msg;
         Worker::safeEcho($err.PHP_EOL);
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
         self::err($err);
@@ -545,7 +545,7 @@ class WorkerManSrv extends SrvBase {
         //if (!$this->task_worker_num) return null;
         $fp = stream_socket_client("tcp://" . self::$taskAddr, $errno, $errstr, 1);
         if (!$fp) {
-            self::err("$errstr ($errno)");
+            self::err(date('Y-m-d H:i:s ') . $errstr . ' (' . $errno . ')');
             return false;
         }
         //stream_set_blocking($fp, false); //非阻塞模式
