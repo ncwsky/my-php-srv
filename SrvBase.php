@@ -367,4 +367,28 @@ abstract class SrvBase{
         file_put_contents(static::$logFile, \date('Y-m-d H:i:s') . ' ' . 'pid:'
             . (DIRECTORY_SEPARATOR === '\\' ? 1 : posix_getpid()) . ' ' . $msg, FILE_APPEND | LOCK_EX);
     }
+
+    /**
+     * @param \Workerman\Connection\TcpConnection|\swoole_server $con
+     * @param int $fd
+     * @param string $msg
+     */
+    public static function toClose($con, $fd=0, $msg=null){
+        if (self::$instance->isWorkerMan) {
+            $con->close($msg);
+        } else {
+            if ($msg) $con->send($fd, $msg);
+            $con->close($fd);
+        }
+    }
+
+    /**
+     * @param \Workerman\Connection\TcpConnection|\swoole_server $con
+     * @param int $fd
+     * @param string $msg
+     * @return bool|null
+     */
+    public static function toSend($con, $fd, $msg){
+        return self::$instance->isWorkerMan ? $con->send($msg) : $con->send($fd, $msg);
+    }
 }
