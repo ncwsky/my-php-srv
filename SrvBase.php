@@ -94,7 +94,7 @@ abstract class SrvBase{
             if(!is_array($worker_load)){
                 $worker_load = [$worker_load];
             }
-            //todo 循环load配置文件或匿名函数 ['file1','file2',...,function(){},...] || function(){};
+            // 循环load配置文件或匿名函数 ['file1','file2',...,function(){},...] || function(){};
             foreach ($worker_load as $load){
                 if(is_string($load) && is_file($load)){
                     include $load;
