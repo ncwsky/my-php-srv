@@ -64,6 +64,8 @@ class WorkerManEvent{
                 myphp::setEnv('headers', $data->header());
                 myphp::setRawBody($data->rawBody()); //file_get_contents("php://input")
                 myphp::Run(function($code, $data, $header) use($connection){
+                    myphp::setEnv('headers');
+                    myphp::setRawBody(null);
                     $code = isset(myphp::$httpCodeStatus[$code]) ? $code : 200;
                     // 发送状态码
                     $response = new \Workerman\Protocols\Http\Response($code);
@@ -113,6 +115,7 @@ class WorkerManEvent{
         $_SERVER = $data['_SERVER'];
         myphp::setRawBody($data['rawBody']);
         myphp::Run(function($code, $data, $header) use($task_id, $src_worker_id){
+            myphp::setRawBody(null);
             if (SrvBase::$isConsole) SrvBase::safeEcho("AsyncTask Finish:Connect.task_id=" . $task_id . ',src_worker_id=' . $src_worker_id . ', ' . (is_string($data) ? $data : toJson($data)) . PHP_EOL);
         }, false);
         unset($_COOKIE, $_FILES, $_GET, $_POST, $_REQUEST, $_SERVER);
