@@ -35,7 +35,7 @@ class WorkerManEvent{
             $_SERVER["REQUEST_URI"] = $data->uri();
             $_SERVER['QUERY_STRING'] = $data->queryString();
 
-            Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
+            GetC('log_level')==0 && Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
 
             // 可在myphp::Run之前加上 用于post不指定url时通过post数据判断ca
             //if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
