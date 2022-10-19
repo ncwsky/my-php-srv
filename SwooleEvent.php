@@ -62,6 +62,7 @@ class SwooleEvent{
             }else{
                 $response->write(Helper::toJson(Control::ok(['task_id'=>$task_id])));
             }
+            $response->end();
         } else {
             myphp::setEnv('headers', $request->header);
             myphp::setRawBody($request->rawContent()); //file_get_contents("php://input")
@@ -76,12 +77,15 @@ class SwooleEvent{
                 $response->status($code);
                 if (is_string($data)) {
                     $data !== '' && $response->write($data);
+                } elseif ($data instanceof SrvSendFile) { //发送文件
+                    $response->sendfile($data->file, $data->offset, $data->size);
+                    return;
                 } else {
                     $response->write(toJson($data));
                 }
+                $response->end();
             }, false);
         }
-        $response->end();
     }
     //异步任务 在task_worker进程内被调用
     public static function onTask(swoole_server $server, int $task_id, int $src_worker_id, $data){

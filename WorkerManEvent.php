@@ -74,6 +74,8 @@ class WorkerManEvent{
                     // 发送内容
                     if (is_string($data)) {
                         $data !== '' && $response->withBody($data);
+                    } elseif ($data instanceof SrvSendFile) { //发送文件
+                        $response->withFile($data->file, $data->offset, $data->size);
                     } else {
                         $response->withBody(toJson($data));
                     }
