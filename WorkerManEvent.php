@@ -66,7 +66,6 @@ class WorkerManEvent{
                 myphp::Run(function($code, $data, $header) use($connection){
                     myphp::setEnv('headers');
                     myphp::setRawBody(null);
-                    $code = isset(myphp::$httpCodeStatus[$code]) ? $code : 200;
                     // 发送状态码
                     $response = new \Workerman\Protocols\Http\Response($code);
                     // 发送头部信息
