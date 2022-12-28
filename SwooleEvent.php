@@ -1,4 +1,7 @@
 <?php
+use myphp\Control;
+use myphp\Helper;
+use myphp\Log;
 class SwooleEvent{
     //有新的连接进入时，在worker进程中回调 $fd 是连接的文件描述符
     public static function onConnect(swoole_server $server, int $fd, int $reactorId){

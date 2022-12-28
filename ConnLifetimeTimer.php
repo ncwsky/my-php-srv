@@ -16,7 +16,7 @@ $lifetimeTimer->onIdle = function () { //空闲释放
 };
 $lifetimeTimer->run();
  */
-
+use myphp\Log;
 /**
  * 连接存活定时器
  */

@@ -604,7 +604,7 @@ class WorkerManSrv extends SrvBase {
         return is_array($req) ? $req['rawbody'] : $req->rawBody();
     }
     /**
-     * @param TcpConnection $connection
+     * @param \Workerman\Connection\TcpConnection $connection
      * @param $code
      * @param $header
      * @param $content
@@ -618,7 +618,7 @@ class WorkerManSrv extends SrvBase {
         if (is_string($content)) {
             $content !== '' && $response->withBody($content);
         } else {
-            $response->withBody(Helper::toJson($content));
+            $response->withBody(self::toJson($content));
         }
         $connection->send($response);
     }

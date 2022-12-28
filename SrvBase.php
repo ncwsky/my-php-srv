@@ -391,4 +391,11 @@ abstract class SrvBase{
     public static function toSend($con, $fd, $msg){
         return self::$instance->isWorkerMan ? $con->send($msg) : $con->send($fd, $msg);
     }
+
+    //json_encode 缩写
+    public static function toJson($res, $option=0){
+        if($option==0 && defined('JSON_UNESCAPED_UNICODE'))
+            $option = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+        return json_encode($res, $option);
+    }
 }

@@ -18,6 +18,7 @@ trait SrvMsg
             return self::$myMsg;
         } else {
             self::msg($msg, $code);
+            return false;
         }
     }
 }

@@ -1,5 +1,8 @@
 <?php
 use Workerman\Connection\ConnectionInterface;
+use myphp\Control;
+use myphp\Helper;
+use myphp\Log;
 class WorkerManEvent{
     //有新的连接进入时， $fd 是连接的文件描述符
     public static function onConnect(ConnectionInterface $connection){

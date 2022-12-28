@@ -418,7 +418,7 @@ class SwooleSrv extends SrvBase {
         if (is_string($content)) {
             $content !== '' && $response->write($content);
         } else {
-            $response->write(Helper::toJson($content));
+            $response->write(self::toJson($content));
         }
         $response->end();
     }
