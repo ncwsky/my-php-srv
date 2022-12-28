@@ -1,8 +1,5 @@
 <?php 
 $cfg = array(
-	'app'=>[
-
-    ],
 	'debug' => true,
 	'root_dir'=> '',
     'log_dir' => __DIR__ . '/log/', //日志记录主目录名称
