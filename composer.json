@@ -17,8 +17,8 @@
         }
     ],
     "require": {
-        "php": ">=5.4",
-		"myphps/myphp": "^2.0",
+        "php": ">=7.0",
+		"myphps/myphp": "^3.0",
         "workerman/workerman": "^4.1"
     },
     "suggest": {
