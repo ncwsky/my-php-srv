@@ -2,34 +2,43 @@
 namespace app\control;
 
 class IndexAct extends Base{
-	//创建一个方法
-	public function index(){
-/*
-		$res = db()->query("select * from test");	//查询数据库
-		$row = db()->fetch_array($res);	//获得查询结果
-		return $row;	//输出结果
-*/
-		$title = '欢迎信息';
-		$mess = '我的一个MVC框架';
-		//赋值给模板变量
-		$this->assign('title', $title);
-		$this->assign('mess', $mess);
-		return $this->fetch('index.html');
-/*
-		//可不用assign进行模板赋值
-		\myphp\View::obStart();
-		include \myphp\View::doTemp('index.html');
+    public function _init(){
+        header('Access-Control-Allow-Origin: *'); //跨域测试
+        header('Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept'); //跨域测试
+        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE'); //跨域测试
+    }
+    public function index(){
+        $url = Q('get.url:273'); #validate_url: 273
+        if(!$url){
+            return self::json(self::fail('error url'));
+        }
 
-		$this->assign('mess', '');
-		return $this->fetch();
+        $headers = \myphp::env('headers', getallheaders());
+        $header = $headers['cookie']??'';
 
-		extract($this->view->vars);
-		\myphp\View::obStart();
-		include \myphp\View::doTemp();
+        $timeout = Q('get.timeout%d{1,60}', 35);
+        if(\myphp\Helper::isPost()){
+            $data = Q('post.:null');
+            $ret = \Http::doPost($url, $data, $timeout, '', ['cookie'=>$header,'res'=>true]);
+        }else{
+            $ret = \Http::doGet($url, $timeout, '', ['cookie'=>$header,'res'=>true]);
+        }
+        if($ret===false){
+            return self::json(self::fail('请求失败'));
+        }
 
-		//还可以与assign混合使用 此处在__construct 时特别有用 可以对一些类里全局使用的模板变量进行赋值调用
-		\myphp\View::obStart();extract($this->view->vars);
-		include \myphp\View::doTemp('index.html');
-*/
-	}
+        $contentType = '';
+        $headers = explode("\r\n", $ret['res_header']);
+        foreach ($headers as $v){
+            if(strpos($v,': ')){
+                list($name, $val) = explode(': ', $v, 2);
+                if($name=='Set-Cookie' || $name=='Content-Type'){
+                    \myphp::setHeader($name, $val);
+                    //break;
+                }
+            }
+        }
+
+        return $ret['res_body'];
+    }
 }
