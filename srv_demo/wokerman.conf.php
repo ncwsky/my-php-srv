@@ -6,7 +6,7 @@ return [
     'port' => 6001, //监听地址
     'type' => 'http', //类型[http tcp websocket udp] 可通过修改createServer方法自定义服务创建
     'timer_dir' => __DIR__ . '/timer', //定时运行目录
-    'myphp_dir' => __DIR__ .'/../myphp', //myphp目录
+    'myphp_dir' => __DIR__ .'/../vendor/myphps/myphp', //myphp目录
     'conf_file'=> __DIR__ .'/conf.php', //app配置文件
     'context'=>[ //$context_option 资源流上下文配置
 	/*  'ssl' => [ //启用ssl
