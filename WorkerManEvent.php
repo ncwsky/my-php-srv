@@ -2,18 +2,29 @@
 use Workerman\Connection\ConnectionInterface;
 use myphp\Control;
 use myphp\Helper;
-use myphp\Log;
+
 class WorkerManEvent{
     //有新的连接进入时， $fd 是连接的文件描述符
     public static function onConnect(ConnectionInterface $connection){
         $fd = $connection->id;
     }
-    //接收到数据时回调此函数
+
+    /**
+     * 接收到数据时回调此函数
+     * @param ConnectionInterface $connection
+     * @param string|\Workerman\Protocols\Http\Request $data
+     * @throws Exception
+     */
     public static function onMessage(ConnectionInterface $connection, $data){
         static $request_count = 0;
 
         //如果有http请求需要判断处理
         if(SrvBase::$isHttp || (isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)){
+            $_SESSION = null;
+            //引入session
+            \myphp\Session::on(function () use($data){
+                return $data->session();
+            });
             //重置
             $_SERVER = WorkerManSrv::$_SERVER; //使用初始的server
             $_COOKIE = $data->cookie();
@@ -21,7 +32,6 @@ class WorkerManEvent{
             $_GET = $data->get();
             $_POST = $data->post();
             $_REQUEST = array_merge($_GET, $_POST);
-            //$_SESSION = $data->session()->all();
             $_SERVER['REMOTE_ADDR'] = $connection->getRemoteIp();
             $_SERVER['REQUEST_METHOD'] = $data->method();
             foreach ($data->header() as $k=>$v){
@@ -38,7 +48,7 @@ class WorkerManEvent{
             $_SERVER["REQUEST_URI"] = $data->uri();
             $_SERVER['QUERY_STRING'] = $data->queryString();
 
-            GetC('log_level')==0 && Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
+            GetC('log_level')==0 && \myphp\Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
 
             // 可在myphp::Run之前加上 用于post不指定url时通过post数据判断ca
             //if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
