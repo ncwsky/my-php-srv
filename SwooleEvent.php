@@ -46,9 +46,6 @@ class SwooleEvent{
 
         GetC('log_level')==0 && Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
 
-        // 可在myphp::Run之前加上 用于post不指定url时通过post数据判断ca
-        //if(!isset($_GET['c']) && isset($_POST['c'])) $_GET['c'] = $_POST['c'];
-        //if(!isset($_GET['a']) && isset($_POST['a'])) $_GET['a'] = $_POST['a'];
         if (SrvBase::$instance->task_worker_num && isset($_REQUEST[ASYNC_NAME]) && $_REQUEST[ASYNC_NAME]==1) { //异步任务
             $task_id = SrvBase::$instance->task([
                 '_COOKIE'=>$_COOKIE,
@@ -67,26 +64,27 @@ class SwooleEvent{
             }
             $response->end();
         } else {
-            myphp::setEnv('headers', $request->header);
-            myphp::setRawBody($request->rawContent()); //file_get_contents("php://input")
-            myphp::Run(function($code, $data, $header) use($response){
-                myphp::setEnv('headers');
-                myphp::setRawBody(null);
+            //myphp::setEnv('headers', $request->header);
+            myphp::req()->setHeaders($request->header);
+            myphp::req()->setRawBody($request->rawContent()); //file_get_contents("php://input")
+            myphp::Run(function($code, $res, $header) use($response){
+                //myphp::setEnv('headers');
                 if($header) {
                     foreach ($header as $name => $val) {
                         $response->header($name, $val);
                     }
                 }
                 $response->status($code);
-                if (is_string($data)) {
+                /**
+                 * @var \myphp\Response $res
+                 */
+                if($res->file){ //发送文件 [$file, $offset, $size]
+                    $response->sendfile($res->file[0], $res->file[1], $res->file[2]);
+                } else{ // 发送内容
+                    $data = is_scalar($res->body) ? $res->body : Helper::toJson($res->body);
                     $data !== '' && $response->write($data);
-                } elseif ($data instanceof SrvSendFile) { //发送文件
-                    $response->sendfile($data->file, $data->offset, $data->size);
-                    return;
-                } else {
-                    $response->write(toJson($data));
+                    $response->end();
                 }
-                $response->end();
             }, false);
         }
     }
@@ -99,10 +97,14 @@ class SwooleEvent{
         $_POST = $data['_POST'];
         $_REQUEST = $data['_REQUEST'];
         $_SERVER = $data['_SERVER'];
-        myphp::setRawBody($data['rawBody']);
-        myphp::Run(function($code, $data, $header) use($task_id, $src_worker_id){
-            myphp::setRawBody(null);
-            if (SrvBase::$isConsole) SrvBase::safeEcho("AsyncTask Finish:Connect.task_id=" . $task_id . ',src_worker_id=' . $src_worker_id . ', ' . (is_string($data) ? $data : toJson($data)) . PHP_EOL);
+        myphp::req()->setHeaders($data['header']);
+        myphp::req()->setRawBody($data['rawBody']);
+        myphp::Run(function($code, $res, $header) use($task_id, $src_worker_id){
+            /**
+             * @var \myphp\Response $res
+             */
+            $data = is_scalar($res->body) ? $res->body : Helper::toJson($res->body);
+            if (SrvBase::$isConsole) SrvBase::safeEcho("AsyncTask Finish:Connect.task_id=" . $task_id . ',src_worker_id=' . $src_worker_id . ', ' . $data . PHP_EOL);
         }, false);
         unset($_COOKIE, $_FILES, $_GET, $_POST, $_REQUEST, $_SERVER);
         //return 等同$server->finish($response); 这里没有return不会触发finish事件
