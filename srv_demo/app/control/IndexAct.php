@@ -1,6 +1,8 @@
 <?php
 namespace app\control;
 
+use myphp\Log;
+
 class IndexAct extends Base{
     public function _init(){
         header('Access-Control-Allow-Origin: *'); //跨域测试
@@ -13,15 +15,13 @@ class IndexAct extends Base{
             return self::json(self::fail('error url'));
         }
 
-        $headers = \myphp::env('headers', getallheaders());
-        $header = $headers['cookie']??'';
-
+        $cookie = \myphp::req()->header('Cookie', '');
         $timeout = Q('get.timeout%d{1,60}', 35);
         if(\myphp\Helper::isPost()){
             $data = Q('post.:null');
-            $ret = \Http::doPost($url, $data, $timeout, '', ['cookie'=>$header,'res'=>true]);
+            $ret = \Http::doPost($url, $data, $timeout, '', ['cookie'=>$cookie,'res'=>true,'redirect'=>3]);
         }else{
-            $ret = \Http::doGet($url, $timeout, '', ['cookie'=>$header,'res'=>true]);
+            $ret = \Http::doGet($url, $timeout, '', ['cookie'=>$cookie,'res'=>true,'redirect'=>3]);
         }
         if($ret===false){
             return self::json(self::fail('请求失败'));
@@ -40,5 +40,21 @@ class IndexAct extends Base{
         }
 
         return $ret['res_body'];
+    }
+    //下载文件
+    public function down()
+    {
+        $file = trim($this->request->get('file', ''));
+        if ($file==='' || strpos($file, '..')) {
+            return self::fail('文件路径无效');
+        }
+        $root = 'F:\\'; //指定下载目录
+        $file = ltrim($file, '/');
+        $_file = $root . $file;
+        if (!file_exists($_file)) {
+            return self::fail('文件不存在:'.$_file);
+        }
+        $this->response->steamLimit = 100; //每秒100kB
+        return $this->response->sendFile($_file);
     }
 }
