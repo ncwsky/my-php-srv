@@ -34,3 +34,20 @@ $srv = new WorkerManHttpSrv($cfg);
 $srv->run($argv);
 ```
 >conf.php是myphp的配置文件
+
+##Workerman Event
+onWorkerStart|onWorkerReload(Workerman\Worker $worker)   
+onConnect|onClose|onBufferFull|onBufferDrain(Workerman\Connection\TcpConnection TcpConnection $connection)    
+onMessage(Workerman\Connection\TcpConnection TcpConnection $connection, string|Workerman\Protocols\Http\Request $data)    
+onError(Workerman\Connection\TcpConnection $connection, $code, $msg)      
+
+##Swoole Event
+onWorkerStart|onWorkerStop(Swoole\Server $server, int $workerId)     
+onWorkerError(Swoole\Server $server, int $worker_id, int $worker_pid, int $exit_code, int $signal)  
+onConnect|onClose(Swoole\Server $server, int $fd, int $reactorId)     
+onTask(Swoole\Server $server, int $task_id, int $src_worker_id, mixed $data)  
+tcp onReceive(Swoole\Server $server, int $fd, int $reactorId, string $data)     
+udp onPacket(Swoole\Server $server, string $data, array $clientInfo)    
+ws onMessage(Swoole\WebSocket\Server $server, Swoole\WebSocket\Frame $frame)
+http onRequest(Swoole\Http\Request $request, Swoole\Http\Response $response)    
+ 
