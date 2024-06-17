@@ -129,13 +129,19 @@ class WorkerManSrv extends SrvBase {
             Worker::$stdoutFile = $this->config['setting']['stdoutFile'];
             unset($this->config['setting']['stdoutFile']);
         }
-        if(isset($this->config['setting']['pidFile'])) {
+        if (isset($this->config['setting']['pidFile'])) {
             Worker::$pidFile = $this->config['setting']['pidFile'];
             unset($this->config['setting']['pidFile']);
+        } elseif (isset($this->config['setting']['pid_file'])) { //兼容处理
+            Worker::$pidFile = $this->config['setting']['pid_file'];
+            unset($this->config['setting']['pid_file']);
         }
-        if(isset($this->config['setting']['logFile'])) {
+        if (isset($this->config['setting']['logFile'])) {
             Worker::$logFile = $this->config['setting']['logFile'];
             unset($this->config['setting']['logFile']);
+        } elseif (isset($this->config['setting']['log_file'])) { //兼容处理
+            Worker::$logFile = $this->config['setting']['log_file'];
+            unset($this->config['setting']['log_file']);
         }
         $context = $this->getConfig('context', []); //资源上下文
         if($this->task_worker_num) {

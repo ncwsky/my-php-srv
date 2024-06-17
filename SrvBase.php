@@ -369,6 +369,7 @@ abstract class SrvBase{
     }
 
     /**
+     * tcp|websocket close
      * @param \Workerman\Connection\TcpConnection|\swoole_server $con
      * @param int $fd
      * @param string $msg
@@ -383,6 +384,7 @@ abstract class SrvBase{
     }
 
     /**
+     * tcp|websocket send
      * @param \Workerman\Connection\TcpConnection|\swoole_server $con
      * @param int $fd
      * @param string $msg
