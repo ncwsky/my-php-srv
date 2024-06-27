@@ -32,6 +32,9 @@ abstract class SrvBase{
     protected $hasInitMyPhp = false;
     public $port;
     protected $ip;
+    /**
+     * @var WorkerManSrv|SwooleSrv
+     */
     public static $instance;
     const TYPE_HTTP = 'http';
     const TYPE_TCP = 'tcp';
@@ -232,6 +235,7 @@ abstract class SrvBase{
 
     /** 连接信息
      * @param int $fd
+     *
      * @return array|null
      */
     abstract public function clientInfo($fd);
