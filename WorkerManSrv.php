@@ -587,12 +587,12 @@ class WorkerManSrv extends SrvBase {
     }
 
     /** 获取客户端信息
-     * @param $fd
-     * @param bool $obj $fd是否是对象
+     * @param int $fd
+     * @param \Workerman\Connection\ConnectionInterface $conn
      * @return array|null
      */
-    public function clientInfo($fd, $obj=false){
-        $connection = $obj ? $fd : $this->getConnection($fd);
+    public function clientInfo($fd, $conn=null){
+        $connection = $conn ? $conn : $this->getConnection($fd);
         if($connection){
             return [
                 'remote_ip'=> $connection->getRemoteIp(),

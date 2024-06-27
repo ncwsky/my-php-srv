@@ -231,7 +231,7 @@ abstract class SrvBase{
     abstract public function close($fd);
 
     /** 连接信息
-     * @param $fd
+     * @param int $fd
      * @return array|null
      */
     abstract public function clientInfo($fd);
