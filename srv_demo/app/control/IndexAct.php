@@ -1,9 +1,7 @@
 <?php
 namespace app\control;
 
-use myphp\Log;
-
-class IndexAct extends Base{
+class IndexAct extends \myphp\Control{
     public function _init(){
         header('Access-Control-Allow-Origin: *'); //跨域测试
         header('Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept'); //跨域测试
@@ -27,7 +25,6 @@ class IndexAct extends Base{
             return self::json(self::fail('请求失败'));
         }
 
-        $contentType = '';
         $headers = explode("\r\n", $ret['res_header']);
         foreach ($headers as $v){
             if(strpos($v,': ')){
