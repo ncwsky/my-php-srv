@@ -1,0 +1,3 @@
+# Ignore all tests, documentation and dot files for archive
+/.gitattributes    export-ignore
+/srv_demo          export-ignore

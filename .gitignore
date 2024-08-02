@@ -8,3 +8,4 @@ srv_demo/composer*
 *.pid
 .idea
 runLock
+/composer.lock

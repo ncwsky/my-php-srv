@@ -25,6 +25,6 @@
         "ext-event": "For better performance. "
     },
     "autoload": {
-        "files":["./Load.php"]
+        "classmap":["./"]
     }
 }
