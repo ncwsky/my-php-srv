@@ -8,23 +8,12 @@
     "homepage": "https://github.com/ncwsky/MyPhpSrv",
     "license": "MIT",
     "description": "swoole/workerman集成服务",
-    "authors": [
-        {
-            "name": "路人",
-            "email": "ep1086@qq.com",
-            "homepage": "https://github.com/ncwsky/MyPhpSrv",
-            "role": "Developer"
-        }
-    ],
     "require": {
         "php": ">=7.0",
 		"myphps/myphp": "^2.7",
         "workerman/workerman": "^4.1"
     },
-    "suggest": {
-        "ext-event": "For better performance. "
-    },
     "autoload": {
-        "classmap":["./"]
+        "classmap":[""]
     }
 }
