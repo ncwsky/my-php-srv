@@ -13,6 +13,8 @@
 		"myphps/myphp": "^2.18",
         "workerman/workerman": "^4.1"
     },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
     "autoload": {
         "classmap":[""]
     }
