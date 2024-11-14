@@ -10,7 +10,7 @@
     "description": "swoole/workerman集成服务",
     "require": {
         "php": ">=7.0",
-		"myphps/myphp": "^2.7",
+		"myphps/myphp": "^2.18",
         "workerman/workerman": "^4.1"
     },
     "autoload": {
