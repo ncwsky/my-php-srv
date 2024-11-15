@@ -1,8 +1,9 @@
 <?php
+use Swoole\Server;
 /**
  * Class SwooleSrv
- * @method onManagerStart(swoole_server $server) //管理进程回调 有配置才会运行
- * @method onManagerStop(swoole_server $server) //结束管理进程回调 有配置才会运行
+ * @method onManagerStart(Server $server) //管理进程回调 有配置才会运行
+ * @method onManagerStop(Server $server) //结束管理进程回调 有配置才会运行
  */
 class SwooleSrv extends SrvBase {
     protected $mode; //运行模式 单线程模式（SWOOLE_BASE）| 进程模式（SWOOLE_PROCESS）[默认]
@@ -32,11 +33,11 @@ class SwooleSrv extends SrvBase {
         $this->pidFile = $this->getConfig('setting.pid_file', $this->runDir . '/server.pid');
     }
     //此事件在Server正常结束时发生
-    public function onShutdown(swoole_server $server){
+    public function onShutdown(Server $server){
         static::safeEcho($this->serverName().' shutdown '.date("Y-m-d H:i:s"). PHP_EOL);
     }
     //管理进程 这里载入了php会造成与worker进程里代码冲突
-    public function _onManagerStart(swoole_server $server){
+    public function _onManagerStart(Server $server){
         $this->setProcessTitle($this->serverName() . '-manager');
         static::safeEcho($this->serverName().', swoole'. SWOOLE_VERSION .' start '.date("Y-m-d H:i:s"). PHP_EOL);
         static::safeEcho($this->address.PHP_EOL);
@@ -49,7 +50,7 @@ class SwooleSrv extends SrvBase {
         }
     }
     //当管理进程结束时调用它
-    public function _onManagerStop(swoole_server $server){
+    public function _onManagerStop(Server $server){
         static::safeEcho('manager pid:' . $server->manager_pid . ' end' . PHP_EOL);
 
         if(method_exists($this, 'onManagerStop')){
@@ -62,11 +63,11 @@ class SwooleSrv extends SrvBase {
         SrvTimer::destroy();
     }
     /** 此事件在Worker进程/Task进程启动时发生 这里创建的对象可以在进程生命周期内使用 如mysql/redis...
-     * @param swoole_server $server
+     * @param \Swoole\Server $server
      * @param int $worker_id [0-$worker_num)区间内的数字
      * @return bool
      */
-    final public function _onWorkerStart($server, $worker_id){
+    final public function _onWorkerStart(Server $server, $worker_id){
         $this->initMyPhp();
         self::$_SERVER = $_SERVER; //存放初始的$_SERVER
 
@@ -85,7 +86,7 @@ class SwooleSrv extends SrvBase {
         }
 
         if ($worker_id >= $server->setting['worker_num']) {
-            swoole_set_process_name($this->serverName()."-{$worker_id}-Task");
+            cli_set_process_title($this->serverName()."-{$worker_id}-Task");
         } else {
             $this->setProcessTitle($this->serverName()."-{$worker_id}-Worker");
         }
@@ -95,10 +96,10 @@ class SwooleSrv extends SrvBase {
     //此事件在Worker进程终止时发生 在此函数中可以回收Worker进程申请的各类资源
 
     /**
-     * @param swoole_server $server
+     * @param Server $server
      * @param int $worker_id
      */
-    final public function _onWorkerStop($server, $worker_id){
+    final public function _onWorkerStop(Server $server, $worker_id){
         if (!$server->taskworker) { //worker进程  异常结束后执行的逻辑
             static::safeEcho('Worker Stop clear' . PHP_EOL);
             $timer = new SwooleTimer();
@@ -109,10 +110,10 @@ class SwooleSrv extends SrvBase {
     //仅在开启reload_async特性后有效。异步重启特性，会先创建新的Worker进程处理新请求，旧的Worker进程自行退出。
     //https://wiki.swoole.com/wiki/page/808.html
     /**
-     * @param swoole_server $server
+     * @param Server $server
      * @param int $worker_id
      */
-    public function onWorkerExit($server, $worker_id){
+    public function onWorkerExit(Server $server, $worker_id){
         //todo
         /*if($timers = (new SwooleTimer())->timer()) { //直接读取配置文件
             foreach ($timers as $item){ #清除当前工作进程内的所有定时器
@@ -122,13 +123,13 @@ class SwooleSrv extends SrvBase {
     }
     //此函数主要用于报警和监控，一旦发现Worker进程异常退出，那么很有可能是遇到了致命错误或者进程CoreDump。通过记录日志或者发送报警的信息来提示开发者进行相应的处理
     /** 当Worker/Task进程发生异常后会在Manager进程内回调此函数
-     * @param swoole_server $server
+     * @param Server $server
      * @param int $worker_id 是异常进程的编号
      * @param int $worker_pid 是异常进程的ID
      * @param int $exit_code 退出的状态码，范围是 0～255
      * @param int $signal 进程退出的信号
      */
-    final public function _onWorkerError(swoole_server $server, $worker_id, $worker_pid, $exit_code, $signal){
+    final public function _onWorkerError(Server $server, $worker_id, $worker_pid, $exit_code, $signal){
         $err = date('Y-m-d H:i:s ') . '异常进程的编号:'.$worker_id.', 异常进程的ID:'.$worker_pid.', 退出的状态码:'.$exit_code.', 进程退出信号:'.$signal;
         static::safeEcho($err.PHP_EOL);
         //todo 记录日志或者发送报警的信息来提示开发者进行相应的处理
@@ -148,24 +149,25 @@ class SwooleSrv extends SrvBase {
         //监听1024以下的端口需要root权限
         switch ($type){
             case self::TYPE_HTTP:
-                $this->server = new swoole_http_server($this->ip, $this->port, $this->mode, $sockType);
+                $this->server = new \Swoole\Http\Server($this->ip, $this->port, $this->mode, $sockType);
                 $this->server->type = self::TYPE_HTTP;
+                self::$isHttp = true;
                 break;
             case self::TYPE_WEB_SOCKET:
-                $this->server = new swoole_websocket_server($this->ip, $this->port, $this->mode, $sockType);
+                $this->server = new \Swoole\WebSocket\Server($this->ip, $this->port, $this->mode, $sockType);
                 $this->server->type = self::TYPE_WEB_SOCKET;
                 break;
             case self::TYPE_UDP:
-                $this->server = new swoole_server($this->ip, $this->port, $this->mode, $isSSL ? SWOOLE_SOCK_UDP | SWOOLE_SSL : SWOOLE_SOCK_UDP);
+                $this->server = new Server($this->ip, $this->port, $this->mode, $isSSL ? SWOOLE_SOCK_UDP | SWOOLE_SSL : SWOOLE_SOCK_UDP);
                 $this->server->type = self::TYPE_UDP;
                 break;
             case self::TYPE_UNIX:
                 $this->ip = (is_dir('/dev/shm') ? '/dev/shm' : $this->runDir) . '/' . $this->serverName() . $this->ip;
-                $this->server = new swoole_server($this->ip, 0, $this->mode, SWOOLE_UNIX_STREAM);
+                $this->server = new Server($this->ip, 0, $this->mode, SWOOLE_UNIX_STREAM);
                 $this->server->type = self::TYPE_UNIX;
                 break;
             default:
-                $this->server = new swoole_server($this->ip, $this->port, $this->mode, $sockType);
+                $this->server = new Server($this->ip, $this->port, $this->mode, $sockType);
                 $this->server->type = self::TYPE_TCP;
         }
         $this->address = $this->server->type.'://'.$this->ip.':'.$this->port;
@@ -250,7 +252,7 @@ class SwooleSrv extends SrvBase {
         //初始事件绑定
         //BASE模式无start事件
         if ($this->mode == SWOOLE_PROCESS) {
-            $server->on('Start', function (swoole_server $server) {//回调有错误时 可能不会有主进程
+            $server->on('Start', function ($server) {//回调有错误时 可能不会有主进程
                 $this->setProcessTitle($this->serverName() . '-master');
                 if (method_exists($this, 'onStart')) {
                     $this->initMyPhp();
@@ -339,25 +341,6 @@ class SwooleSrv extends SrvBase {
                 }
             });
         }
-
-        /*
-        #设置了task_ipc_mode = 3将无法使用sendMessage向特定的task进程发送消息
-        $server->on('PipeMessage', function (swoole_server $srv, $task_id, $data) {
-            SwooleEvent::onPipeMessage($srv, $task_id, $data);
-        });*/
-        /**
-         * 用户进程实现了广播功能，循环接收管道消息，并发给服务器的所有连接
-         * https://wiki.swoole.com/wiki/page/390.html 参见示例
-         */
-        /*
-        $server = $this->server;
-        $process = new swoole_process(function($process) use ($server) {
-            while (true) {
-                //todo
-            }
-        });
-        $this->server->addProcess($process);
-        */
     }
     public function workerId(){
         return $this->server->worker_id;
@@ -402,7 +385,7 @@ class SwooleSrv extends SrvBase {
         return is_array($req) ? $req['rawbody'] : $req->rawContent();
     }
     /**
-     * @param swoole_http_response $response
+     * @param \Swoole\Http\Response $response
      * @param $code
      * @param $header
      * @param $content

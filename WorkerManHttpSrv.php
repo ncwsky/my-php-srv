@@ -4,6 +4,5 @@ class WorkerManHttpSrv extends WorkerManSrv {
     protected function beforeInit()
     {
         $this->config['type'] = self::TYPE_HTTP;
-        self::$isHttp = true;
     }
 }

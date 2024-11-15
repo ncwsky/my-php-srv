@@ -19,7 +19,7 @@ class WorkerManEvent{
         static $request_count = 0;
 
         //如果有http请求需要判断处理
-        if(SrvBase::$isHttp || (isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)){
+        if(WorkerManSrv::$isHttp || (isset($connection->worker->type) && $connection->worker->type==SrvBase::TYPE_HTTP)){
             $_SESSION = null;
             //引入session
             \myphp\Session::on(function () use($data){

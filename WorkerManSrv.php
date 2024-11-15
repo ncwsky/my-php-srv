@@ -154,6 +154,7 @@ class WorkerManSrv extends SrvBase {
             case self::TYPE_HTTP:
                 $this->server = new Worker2(self::TYPE_HTTP.'://'.$this->ip.':'.$this->port, $context);
                 $this->server->type = self::TYPE_HTTP;
+                self::$isHttp = true;
                 break;
             case self::TYPE_WEB_SOCKET:
                 $this->server = new Worker2( self::TYPE_WEB_SOCKET.'://'.$this->ip.':'.$this->port, $context);
