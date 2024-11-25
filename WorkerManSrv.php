@@ -125,6 +125,10 @@ class WorkerManSrv extends SrvBase {
     //初始服务
     final public function init(){
         Worker::$daemonize = self::$isConsole ? false : true; //守护进程化;
+        if(isset($this->config['setting']['statusFile'])) {
+            Worker::$statusFile = $this->config['setting']['statusFile'];
+            unset($this->config['setting']['statusFile']);
+        }
         if(isset($this->config['setting']['stdoutFile'])) {
             Worker::$stdoutFile = $this->config['setting']['stdoutFile'];
             unset($this->config['setting']['stdoutFile']);
