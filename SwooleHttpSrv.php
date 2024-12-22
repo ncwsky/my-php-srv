@@ -1,5 +1,8 @@
 <?php
-class SwooleHttpSrv extends SwooleSrv {
+
+declare(strict_types=1);
+class SwooleHttpSrv extends SwooleSrv
+{
     //初始服务之前执行
     protected function beforeInit()
     {

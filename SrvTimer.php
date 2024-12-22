@@ -1,22 +1,26 @@
 <?php
+
+declare(strict_types=1);
 //定时处理
-abstract class SrvTimer {
+abstract class SrvTimer
+{
     use SrvMsg;
     public static $timers = []; //运行期间有效的定时器记录
     public $shmFile; // 使用/dev/shm[内存] 优化读取定时配置
     public $timerFile;
-	public function __construct()
+    public function __construct()
     {
         $this->timerFile = SrvBase::$instance->getConfig('timer_file'); //, SrvBase::$instance->runDir .'/timer.json' //无定时记录文件时 定时重启后失效
-        $this->shmFile =  $this->timerFile ? '/dev/shm/'.str_replace(['/','\\'],'',  SrvBase::$instance->serverName().'_'.$this->timerFile) : '';
+        $this->shmFile =  $this->timerFile ? '/dev/shm/'.str_replace(['/','\\'], '', SrvBase::$instance->serverName().'_'.$this->timerFile) : '';
         //定时处理载入
         $time_dir = SrvBase::$instance->getConfig('timer_dir', APP_PATH.'/timer');
         is_dir($time_dir) && myphp::class_dir($time_dir);
     }
     //销毁定时内存缓存配置
-    public static function destroy(){
+    public static function destroy()
+    {
         $timerFile = SrvBase::$instance->getConfig('timer_file');
-        $shmFile =  $timerFile ? '/dev/shm/'.str_replace(['/','\\'],'',  SrvBase::$instance->serverName().'_'.$timerFile) : '';
+        $shmFile =  $timerFile ? '/dev/shm/'.str_replace(['/','\\'], '', SrvBase::$instance->serverName().'_'.$timerFile) : '';
         file_exists($shmFile) && @unlink($shmFile);
     }
 
@@ -24,25 +28,26 @@ abstract class SrvTimer {
      * @param null $data  null时读取
      * @return mixed
      */
-    public function timer($data=null){
+    public function timer($data = null)
+    {
         $timerFile =  $this->timerFile;
-        if($data===null){
-            if($this->shmFile && file_exists($this->shmFile)){
+        if ($data === null) {
+            if ($this->shmFile && file_exists($this->shmFile)) {
                 $data = file_get_contents($this->shmFile);
-            }elseif(is_file($timerFile)){
+            } elseif (is_file($timerFile)) {
                 $data = file_get_contents($timerFile);
-                if($this->shmFile && !is_file($this->shmFile) && is_dir( '/dev/shm')){
+                if ($this->shmFile && !is_file($this->shmFile) && is_dir('/dev/shm')) {
                     file_put_contents($this->shmFile, $data, LOCK_EX); //生成初始的内存缓存文件
                     echo 'timer cache shm ok!',PHP_EOL;
                 }
             }
             return $data === null ? self::$timers : json_decode($data, true); //没有定时配置时 返回进程内临时定时器
         }
-        if($timerFile){ //记录定时
+        if ($timerFile) { //记录定时
             self::$timers = $data;
             $data = json_encode($data);
             file_put_contents($timerFile, $data, LOCK_EX); //记录定时记录
-            if($this->shmFile && is_dir( '/dev/shm')){
+            if ($this->shmFile && is_dir('/dev/shm')) {
                 file_put_contents($this->shmFile, $data, LOCK_EX); //写入到内存缓存文件
             }
         }
@@ -69,16 +74,17 @@ abstract class SrvTimer {
     abstract public function clear($timerWorkerId, $timerId);
 
     //添加定时器
-    final public function addTimer($data, $force=false){
-        $interval = Q('data.interval%d',0,$data);
-        $type = Q('data.type','tick',$data);
+    final public function addTimer($data, $force = false)
+    {
+        $interval = isset($data['interval']) ? (int)$data['interval'] : 0;
+        $type = $data['type'] ?? 'tick';
 
-        if($interval<=0 || $interval>86400000){
+        if ($interval <= 0 || $interval > 86400000) {
             self::err('定时时间无效');
             return false;
         }
         $timers = $this->timer(); //重新读取定时配置
-        if(!$force && isset($timers[$interval])) {
+        if (!$force && isset($timers[$interval])) {
             self::err('已存在 '.$interval.' 定时器');
             return false;
         }
@@ -94,9 +100,9 @@ abstract class SrvTimer {
             return false;
         }
 
-        list($workerId, $timerId) = $type == 'after' ? $this->after($timer, $interval) : $this->tick($timer, $interval);
+        [$workerId, $timerId] = $type == 'after' ? $this->after($timer, $interval) : $this->tick($timer, $interval);
 
-        $timers[$interval] = array('timerid'=>$timerId, 'type'=>$type, 'interval'=>$interval, 'worker_id'=>$workerId, 'status'=>1);
+        $timers[$interval] = ['timerid' => $timerId, 'type' => $type, 'interval' => $interval, 'worker_id' => $workerId, 'status' => 1];
         $this->timer($timers); //更新定时记录
         self::msg($interval.' 定时器添加成功');
         return $timers[$interval];
@@ -106,14 +112,15 @@ abstract class SrvTimer {
      * @param int $interval 定时器标识 单位秒
      * @return bool
      */
-    final public function clearTimer($interval){
+    final public function clearTimer($interval)
+    {
         $timers = $this->timer();
-        if(isset($timers[$interval])){
-            $timers[$interval]['status']=0; //标记定时器失效
+        if (isset($timers[$interval])) {
+            $timers[$interval]['status'] = 0; //标记定时器失效
             $timerWorkerId = $timers[$interval]['worker_id'];
 
             $workId = $this->clear($timerWorkerId, $timers[$interval]['timerid']); //执行清除处理
-            if($workId==$timerWorkerId){
+            if ($workId == $timerWorkerId) {
                 unset($timers[$interval]);
             }
 
@@ -129,9 +136,10 @@ abstract class SrvTimer {
      * @param int $worker_id worker进程id
      * @param int $interval 可指定只启动某定时器
      */
-	final public function start($worker_id, $interval=0){
+    final public function start($worker_id, $interval = 0)
+    {
         if ($timers = $this->timer()) { //定时器在对应进程重启
-            foreach ($timers as $k=>$data) {
+            foreach ($timers as $k => $data) {
                 if ($data['worker_id'] == $worker_id && ($interval == 0 || $interval == $k)) {
                     $ret = $this->addTimer($data, true);
                     echo self::msg(),toJson($ret),PHP_EOL;
@@ -143,9 +151,10 @@ abstract class SrvTimer {
      * @param int $worker_id worker进程id
      * @param int $interval 0停止所有定时器
      */
-	final public function stop($worker_id, $interval=0){
+    final public function stop($worker_id, $interval = 0)
+    {
         if ($timers = $this->timer()) {
-            foreach ($timers as $k=>$data) { //结束定时器
+            foreach ($timers as $k => $data) { //结束定时器
                 if ($data['worker_id'] == $worker_id && ($interval == 0 || $interval == $k)) {
                     $this->clear($data['worker_id'], $data['timerid']);
                 }

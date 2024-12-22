@@ -1,4 +1,6 @@
 <?php
+
+declare(strict_types=1);
 defined('SIGTERM') || define('SIGTERM', 15); //中止服务
 defined('SIGUSR1') || define('SIGUSR1', 10); //柔性重启
 defined('SIGRTMIN') || define('SIGRTMIN', 34); //SIGRTMIN信号重新打开日志文件
@@ -11,15 +13,16 @@ defined('ASYNC_NAME') || define('ASYNC_NAME', 'async');
  * @property \Swoole\Server|Worker2 $server
  * @property \Swoole\Server[]|Worker2[] $childSrv
  */
-abstract class SrvBase{
+abstract class SrvBase
+{
     use SrvMsg;
     //全局变量存放 仅当前的工作进程有效[参见进程隔离]
     public static $_SERVER;
     public static $isHttp = false;
     public $isWorkerMan = false;
     public $task_worker_num = 0;
-	public static $isConsole = false;
-	public static $logFile = '';
+    public static $isConsole = false;
+    public static $logFile = '';
     public $server; //服务实例
     public $childSrv = []; //多个监听时的子服务
     protected $config;
@@ -34,11 +37,11 @@ abstract class SrvBase{
      * @var WorkerManSrv|SwooleSrv
      */
     public static $instance;
-    const TYPE_HTTP = 'http';
-    const TYPE_TCP = 'tcp';
-    const TYPE_UDP = 'udp';
-    const TYPE_WEB_SOCKET = 'websocket';
-    const TYPE_UNIX = 'unix';
+    public const TYPE_HTTP = 'http';
+    public const TYPE_TCP = 'tcp';
+    public const TYPE_UDP = 'udp';
+    public const TYPE_WEB_SOCKET = 'websocket';
+    public const TYPE_UNIX = 'unix';
     public static $types = [
         self::TYPE_HTTP,
         self::TYPE_TCP,
@@ -50,7 +53,7 @@ abstract class SrvBase{
      * SrvBase constructor.
      * @param array $config
      */
-	public function __construct($config)
+    public function __construct($config)
     {
         self::$instance = $this;
         $this->runFile = $_SERVER['SCRIPT_FILENAME'];
@@ -67,50 +70,55 @@ abstract class SrvBase{
             static::$logFile = $config['setting']['log_file'];
         }
 
-        set_error_handler(function($code, $msg, $file, $line){
+        set_error_handler(function ($code, $msg, $file, $line) {
             static::safeEcho("$msg in file $file on line $line\n");
         });
         register_shutdown_function(["SrvBase", 'checkErrors']);
     }
 
-    public function getConfig($name, $def=''){
+    public function getConfig($name, $def = '')
+    {
         //获取值
-        if (false === ($pos = strpos($name, '.')))
-            return isset($this->config[$name]) ? $this->config[$name] : $def;
+        if (false === ($pos = strpos($name, '.'))) {
+            return $this->config[$name] ?? $def;
+        }
         // 二维数组支持
         $name1 = substr($name, 0, $pos);
         $name2 = substr($name, $pos + 1);
-        return isset($this->config[$name1][$name2]) ? $this->config[$name1][$name2] : $def;
+        return $this->config[$name1][$name2] ?? $def;
     }
-    public function serverName(){
-        return $this->getConfig('name', basename($this->runFile,'.php'));
+    public function serverName()
+    {
+        return $this->getConfig('name', basename($this->runFile, '.php'));
     }
-    final protected function initMyPhp(){
+    final protected function initMyPhp()
+    {
         if (function_exists('opcache_reset')) {
             opcache_reset();
         }
         $this->hasInitMyPhp = true;
         $worker_load = $this->getConfig('worker_load');
-        if($worker_load){
-            if(!is_array($worker_load)){
+        if ($worker_load) {
+            if (!is_array($worker_load)) {
                 $worker_load = [$worker_load];
             }
             // 循环load配置文件或匿名函数 ['file1','file2',...,function(){},...] || function(){};
-            foreach ($worker_load as $load){
-                if(is_string($load) && is_file($load)){
+            foreach ($worker_load as $load) {
+                if (is_string($load) && is_file($load)) {
                     include $load;
-                }else{
+                } else {
                     call_user_func($load);
                 }
             }
-        }else{
+        } else {
             include $this->getConfig('conf_file', $this->runDir. '/conf.php') ;
             include $this->getConfig('myphp_dir', $this->runDir.'/myphp').'/base.php';
             myphp::Analysis(false); //为myphp初始app目录自动载入
         }
     }
-    final protected function setProcessTitle($title){
-        set_error_handler(function(){});
+    final protected function setProcessTitle($title)
+    {
+        set_error_handler(function () {});
         // >=php 5.5
         if (function_exists('cli_set_process_title')) {
             cli_set_process_title($title);
@@ -123,7 +131,7 @@ abstract class SrvBase{
     //workerman环境检测
     public static function workermanCheck()
     {
-        if(\DIRECTORY_SEPARATOR !== '\\'){ //非win
+        if (\DIRECTORY_SEPARATOR !== '\\') { //非win
             if (!in_array("pcntl", get_loaded_extensions())) {
                 self::err('Extension pcntl check fail');
                 return false;
@@ -134,7 +142,7 @@ abstract class SrvBase{
             }
         }
 
-        $check_func_map = array(
+        $check_func_map = [
             "stream_socket_server",
             "stream_socket_accept",
             "stream_socket_client",
@@ -154,7 +162,7 @@ abstract class SrvBase{
             "posix_initgroups",
             "posix_setuid",
             "posix_isatty",
-        );
+        ];
         // 获取php.ini中设置的禁用函数
         if ($disable_func_string = ini_get("disable_functions")) {
             $disable_func_map = array_flip(explode(",", $disable_func_string));
@@ -184,9 +192,9 @@ abstract class SrvBase{
         $green = "\033[32;40m";
         $end = "\033[0m";
 
-        $msg = \str_replace(array('<n>', '<w>', '<g>'), array($line, $white, $green), $msg);
-        $msg = \str_replace(array('</n>', '</w>', '</g>'), $end, $msg);
-        set_error_handler(function(){});
+        $msg = \str_replace(['<n>', '<w>', '<g>'], [$line, $white, $green], $msg);
+        $msg = \str_replace(['</n>', '</w>', '</g>'], $end, $msg);
+        set_error_handler(function () {});
         \fwrite($stream, $msg);
         \fflush($stream);
         restore_error_handler();
@@ -195,15 +203,18 @@ abstract class SrvBase{
 
     /****** 分隔线 ******/
     #woker进程回调
-    protected function onWorkerStart($server, $worker_id){
-        if($worker_id==0){ //
+    protected function onWorkerStart($server, $worker_id)
+    {
+        if ($worker_id == 0) { //
             //todo 清理上次服务的全局缓存数据 reload时也会被处理
         }
     }
-    protected function onWorkerStop($server, $worker_id){
+    protected function onWorkerStop($server, $worker_id)
+    {
         //todo
     }
-    protected function onWorkerError($server, $worker_id, $err){
+    protected function onWorkerError($server, $worker_id, $err)
+    {
         //todo
     }
 
@@ -254,14 +265,17 @@ abstract class SrvBase{
     //运行
     abstract protected function exec();
     //初始服务之前执行
-    protected function beforeInit(){
+    protected function beforeInit()
+    {
         //todo
     }
     //初始服务之后执行
-    protected function afterInit(){
+    protected function afterInit()
+    {
         //todo
     }
-    public function start(){
+    public function start()
+    {
         $this->beforeInit();
         //初始服务
         $this->init();
@@ -270,53 +284,57 @@ abstract class SrvBase{
         $this->exec();
     }
     abstract public function relog();
-    public function stop($sig=SIGTERM){
-        if($pid=self::pid()){
+    public function stop($sig = SIGTERM)
+    {
+        if ($pid = self::pid()) {
             static::safeEcho("Stopping...".PHP_EOL);
-            if(posix_kill($pid, $sig)){ //15 可安全关闭(等待任务处理结束)服务器
+            if (posix_kill($pid, $sig)) { //15 可安全关闭(等待任务处理结束)服务器
                 sleep(1);
-                while(self::pid()){
+                while (self::pid()) {
                     static::safeEcho("Waiting for ". $this->serverName() ." to shutdown...".PHP_EOL);
                     sleep(1);
                 }
                 file_exists($this->pidFile) && @unlink($this->pidFile);
                 static::safeEcho($this->serverName()." stopped!".PHP_EOL);
-            }else{
+            } else {
                 static::safeEcho('PID:'.$pid.' stop fail!'.PHP_EOL);
                 return false;
             }
-        }else{
+        } else {
             static::safeEcho('PID invalid! Process is not running.'.PHP_EOL);
         }
         return true;
     }
-    public function reload($sig=SIGUSR1){
-        if($pid=self::pid()){
+    public function reload($sig = SIGUSR1)
+    {
+        if ($pid = self::pid()) {
             $ret = posix_kill($pid, $sig); //10
-            if($ret){
+            if ($ret) {
                 static::safeEcho('reload ok!'.PHP_EOL);
                 return true;
-            }else{
+            } else {
                 static::safeEcho('reload fail!'.PHP_EOL);
             }
-        }else{
+        } else {
             static::safeEcho('PID invalid! Process is not running.'.PHP_EOL);
         }
         return false;
     }
-	public function status(){
-		if($pid=self::pid()){
-			static::safeEcho($this->serverName().' (pid '.$pid.') is running...'.PHP_EOL);
-			return true;
-		}else{
-			static::safeEcho($this->serverName()." is stopped".PHP_EOL);
-			return false;
-		}
-	}
-	//检查进程pid是否存在
-    public function pid(){
-        if(file_exists($this->pidFile) && $pid = file_get_contents($this->pidFile)){
-            if(posix_kill($pid, 0)) { //检测进程是否存在，不会发送信号
+    public function status()
+    {
+        if ($pid = self::pid()) {
+            static::safeEcho($this->serverName().' (pid '.$pid.') is running...'.PHP_EOL);
+            return true;
+        } else {
+            static::safeEcho($this->serverName()." is stopped".PHP_EOL);
+            return false;
+        }
+    }
+    //检查进程pid是否存在
+    public function pid()
+    {
+        if (file_exists($this->pidFile) && $pid = file_get_contents($this->pidFile)) {
+            if (posix_kill($pid, 0)) { //检测进程是否存在，不会发送信号
                 return $pid;
             }
         }
@@ -324,7 +342,7 @@ abstract class SrvBase{
     }
     abstract public function run(&$argv);
 
-    protected static $_errorType = array(
+    protected static $_errorType = [
         E_ERROR             => 'E_ERROR',             // 1
         E_WARNING           => 'E_WARNING',           // 2
         E_PARSE             => 'E_PARSE',             // 4
@@ -340,7 +358,7 @@ abstract class SrvBase{
         E_RECOVERABLE_ERROR => 'E_RECOVERABLE_ERROR', // 4096
         E_DEPRECATED        => 'E_DEPRECATED',        // 8192
         E_USER_DEPRECATED   => 'E_USER_DEPRECATED'   // 16384
-    );
+    ];
 
     public static function checkErrors()
     {
@@ -352,7 +370,7 @@ abstract class SrvBase{
                 $errors['type'] === E_RECOVERABLE_ERROR)
         ) {
             $error_msg = DIRECTORY_SEPARATOR === '\\' ? 'Worker process terminated' : 'Worker['. posix_getpid() .'] process terminated';
-            $error_msg .= ' with ERROR: ' . (isset(static::$_errorType[$errors['type']]) ? static::$_errorType[$errors['type']] : '') . " \"{$errors['message']} in {$errors['file']} on line {$errors['line']}\"";
+            $error_msg .= ' with ERROR: ' . (static::$_errorType[$errors['type']] ?? '') . " \"{$errors['message']} in {$errors['file']} on line {$errors['line']}\"";
             static::log($error_msg);
         }
     }
@@ -363,7 +381,7 @@ abstract class SrvBase{
         if (static::$isConsole) {
             static::safeEcho($msg);
         }
-        if (static::$logFile==='') {
+        if (static::$logFile === '') {
             static::$logFile = __DIR__ . '/../log.log';
         }
         file_put_contents(static::$logFile, \date('Y-m-d H:i:s') . ' ' . 'pid:'
@@ -376,11 +394,14 @@ abstract class SrvBase{
      * @param int $fd
      * @param string $msg
      */
-    public static function toClose($con, $fd=0, $msg=null){
+    public static function toClose($con, $fd = 0, $msg = null)
+    {
         if (self::$instance->isWorkerMan) {
             $con->close($msg);
         } else {
-            if ($msg) $con->send($fd, $msg);
+            if ($msg) {
+                $con->send($fd, $msg);
+            }
             $con->close($fd);
         }
     }
@@ -392,14 +413,17 @@ abstract class SrvBase{
      * @param string $msg
      * @return bool|null
      */
-    public static function toSend($con, $fd, $msg){
+    public static function toSend($con, $fd, $msg)
+    {
         return self::$instance->isWorkerMan ? $con->send($msg) : $con->send($fd, $msg);
     }
 
     //json_encode 缩写
-    public static function toJson($res, $option=0){
-        if($option==0 && defined('JSON_UNESCAPED_UNICODE'))
+    public static function toJson($res, $option = 0)
+    {
+        if ($option == 0 && defined('JSON_UNESCAPED_UNICODE')) {
             $option = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+        }
         return json_encode($res, $option);
     }
 }

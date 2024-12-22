@@ -1,9 +1,14 @@
 <?php
+
+declare(strict_types=1);
 spl_autoload_register('myAutoLoader');
-function myAutoLoader($class_name){
-    static $_class = array();
+function myAutoLoader($class_name)
+{
+    static $_class = [];
     $class_name = strtr($class_name, '\\', '/');
-    if (isset($_class[$class_name])) return true;
+    if (isset($_class[$class_name])) {
+        return true;
+    }
     //命名空间类加载 仿psr4
     if ($pos = strrpos($class_name, '/')) {
         $path = dirname(__DIR__). ($class_name[0] == '/' ? '' : '/') . substr($class_name, 0, $pos);
@@ -19,8 +24,9 @@ function myAutoLoader($class_name){
     }
     return false;
 }
-function autoLoadFile($name, $path = __DIR__, $ext='.php') {
-    static $php = array();
+function autoLoadFile($name, $path = __DIR__, $ext = '.php')
+{
+    static $php = [];
     $path = $path . (substr($path, -1, 1) == '/' ? '' : '/') . $name . $ext;
     if (isset($php[$path])) {
         return true;

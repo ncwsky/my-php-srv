@@ -1,5 +1,7 @@
 #!/usr/bin/env php
 <?php
+
+declare(strict_types=1);
 $_SERVER['SCRIPT_FILENAME'] = __FILE__; //重置运行
 define('APP_PATH', __DIR__ .'/app');
 
