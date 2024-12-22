@@ -8,8 +8,8 @@ defined('ASYNC_NAME') || define('ASYNC_NAME', 'async');
 
 /**
  * Class SrvBase
- * @method onStart //主进程回调 有配置才会运行 仅用于回收数据
- * @method onStop //结束回调 有配置才会运行 仅用于回收数据
+ * @method void onStart() //主进程回调 有配置才会运行 仅用于回收数据
+ * @method void onStop() //结束回调 有配置才会运行 仅用于回收数据
  * @property \Swoole\Server|Worker2 $server
  * @property \Swoole\Server[]|Worker2[] $childSrv
  */
@@ -23,7 +23,13 @@ abstract class SrvBase
     public $task_worker_num = 0;
     public static $isConsole = false;
     public static $logFile = '';
+    /**
+     * @var \Swoole\Server|\Workerman\Worker
+     */
     public $server; //服务实例
+    /**
+     * @var Worker2[]|\Swoole\Server[]
+     */
     public $childSrv = []; //多个监听时的子服务
     protected $config;
     protected $runFile;
@@ -33,9 +39,6 @@ abstract class SrvBase
     protected $hasInitMyPhp = false;
     public $port;
     protected $ip;
-    /**
-     * @var WorkerManSrv|SwooleSrv
-     */
     public static $instance;
     public const TYPE_HTTP = 'http';
     public const TYPE_TCP = 'tcp';
@@ -53,7 +56,7 @@ abstract class SrvBase
      * SrvBase constructor.
      * @param array $config
      */
-    public function __construct($config)
+    public function __construct(array $config)
     {
         self::$instance = $this;
         $this->runFile = $_SERVER['SCRIPT_FILENAME'];
@@ -70,8 +73,9 @@ abstract class SrvBase
             static::$logFile = $config['setting']['log_file'];
         }
 
-        set_error_handler(function ($code, $msg, $file, $line) {
+        set_error_handler(function (int $code, string $msg, string $file, int $line) {
             static::safeEcho("$msg in file $file on line $line\n");
+            return true;
         });
         register_shutdown_function(["SrvBase", 'checkErrors']);
     }
@@ -118,7 +122,9 @@ abstract class SrvBase
     }
     final protected function setProcessTitle($title)
     {
-        set_error_handler(function () {});
+        set_error_handler(function () {
+            return true;
+        });
         // >=php 5.5
         if (function_exists('cli_set_process_title')) {
             cli_set_process_title($title);
@@ -194,7 +200,9 @@ abstract class SrvBase
 
         $msg = \str_replace(['<n>', '<w>', '<g>'], [$line, $white, $green], $msg);
         $msg = \str_replace(['</n>', '</w>', '</g>'], $end, $msg);
-        set_error_handler(function () {});
+        set_error_handler(function () {
+            return true;
+        });
         \fwrite($stream, $msg);
         \fflush($stream);
         restore_error_handler();
@@ -305,7 +313,7 @@ abstract class SrvBase
         }
         return true;
     }
-    public function reload($sig = SIGUSR1)
+    public function reload(int $sig = SIGUSR1)
     {
         if ($pid = self::pid()) {
             $ret = posix_kill($pid, $sig); //10
@@ -331,14 +339,14 @@ abstract class SrvBase
         }
     }
     //检查进程pid是否存在
-    public function pid()
+    public function pid(): int
     {
-        if (file_exists($this->pidFile) && $pid = file_get_contents($this->pidFile)) {
+        if (file_exists($this->pidFile) && $pid = (int)file_get_contents($this->pidFile)) {
             if (posix_kill($pid, 0)) { //检测进程是否存在，不会发送信号
                 return $pid;
             }
         }
-        return false;
+        return 0;
     }
     abstract public function run(&$argv);
 

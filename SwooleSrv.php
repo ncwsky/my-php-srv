@@ -72,7 +72,6 @@ class SwooleSrv extends SrvBase
     /** 此事件在Worker进程/Task进程启动时发生 这里创建的对象可以在进程生命周期内使用 如mysql/redis...
      * @param \Swoole\Server $server
      * @param int $worker_id [0-$worker_num)区间内的数字
-     * @return bool
      */
     final public function _onWorkerStart(Server $server, $worker_id)
     {
@@ -238,10 +237,7 @@ class SwooleSrv extends SrvBase
                 }
                 unset($item['setting']['protocol']);
 
-                //创建其他监听服务
-                /**
-                 * @var \Swoole\Server[];
-                 */
+                //创建其他监听服务 \Swoole\Server[]
                 $this->childSrv[$k] = $this->server->listen($item['ip'], $item['port'], $item['type']);
                 if (isset($item['setting'])) {
                     $this->childSrv[$k]->set($item['setting']);

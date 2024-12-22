@@ -1,9 +1,10 @@
 <?php
 
 declare(strict_types=1);
+
+use Workerman\Connection\TcpConnection;
 use Workerman\Worker;
 use Workerman\Lib\Timer;
-use Workerman\Connection\ConnectionInterface;
 
 /**
  * Class Worker2
@@ -12,7 +13,9 @@ use Workerman\Connection\ConnectionInterface;
  */
 class Worker2 extends Worker
 {
+    public $ip = '';
     public $port = '';
+    public $uniqid = '';
     public $type = 'tcp';
     public $worker_id = 0;
     public $isTask = false; #是否task进程
@@ -68,6 +71,11 @@ class WorkerManSrv extends SrvBase
     public static $chainSocketFile = '';
     public static $fdConnection = null;
 
+    /**
+     * @var Worker2
+     */
+    public $server; //服务实例
+
     private $runLock = ''; #用于判定重载onStart处理
     public function __construct($config)
     {
@@ -79,7 +87,6 @@ class WorkerManSrv extends SrvBase
     /** 此事件在Worker进程启动时发生 这里创建的对象可以在进程生命周期内使用 如mysql/redis...
      * @param Worker2 $worker
      #* @param int $worker_id [0-$worker_num)区间内的数字
-     * @return bool
      */
     final public function _onWorkerStart(Worker2 $worker)
     {
@@ -121,7 +128,7 @@ class WorkerManSrv extends SrvBase
         $this->onWorkerStop($worker, $worker_id);
     }
     //当客户端的连接上发生错误时触发 参见 http://doc.workerman.net/worker/on-error.html
-    final public function _onWorkerError(ConnectionInterface $connection, $code, $msg)
+    final public function _onWorkerError(TcpConnection $connection, $code, $msg)
     {
         $err = date('Y-m-d H:i:s ') . '异常进程的ID:'.$connection->worker->id.', 异常连接的ID:'.$connection->id.', code:'.$code.', msg:'.$msg;
         Worker::safeEcho($err.PHP_EOL);
@@ -230,7 +237,7 @@ class WorkerManSrv extends SrvBase
             isset($event['onWorkerStop']) && call_user_func($event['onWorkerStop'], $worker, $worker->id);
         };
         //当客户端的连接上发生错误时触发
-        $server->onError = function (ConnectionInterface $connection, $code, $msg) use ($event) {
+        $server->onError = function (TcpConnection $connection, $code, $msg) use ($event) {
             $this->_onWorkerError($connection, $code, $msg);
             isset($event['onWorkerError']) && call_user_func($event['onWorkerError'], self::$instance->server, $connection->worker->id, $msg);
         };
@@ -372,7 +379,7 @@ class WorkerManSrv extends SrvBase
             }
             //当客户端的连接上发生错误时触发
             $taskWorker->onError = [$this, '_onWorkerError'];
-            $taskWorker->onConnect = function (ConnectionInterface $connection) use ($taskWorker) {
+            $taskWorker->onConnect = function (TcpConnection $connection) use ($taskWorker) {
                 $connection->send($taskWorker->id); //返回进程id
             };
             $taskWorker->onMessage = function ($connection, $data) use ($taskWorker) {
@@ -432,7 +439,7 @@ class WorkerManSrv extends SrvBase
 
         self::$remoteConnection = new \Workerman\Connection\AsyncTcpConnection('unix://' . self::$chainSocketFile);
         self::$remoteConnection->protocol = '\Workerman\Protocols\Frame';
-        self::$remoteConnection->onClose = null; //可加定时重连
+        //self::$remoteConnection->onClose = null; //可加定时重连
         self::$remoteConnection->onConnect = function ($connection) use ($uniqid) {
             $connection->send(serialize(['a' => 'reg','uniqid' => $uniqid]));
         };
@@ -498,7 +505,7 @@ class WorkerManSrv extends SrvBase
                     $chainData = self::uniqIdToWorker($data['uniqid']);
                     $msg = 'chain reg from ';
                     if ($chainData) {
-                        Worker::safeEcho($msg, 'local_port:'.$chainData['local_port'].', self_id:'.$chainData['self_id'].PHP_EOL);
+                        Worker::safeEcho($msg . ', local_port:' . $chainData['local_port'] . ', self_id:' . $chainData['self_id'] . PHP_EOL);
                     } else {
                         Worker::safeEcho($msg.'fail'.PHP_EOL.PHP_EOL);
                     }
@@ -539,10 +546,9 @@ class WorkerManSrv extends SrvBase
     {
         if (strlen($uniqid) !== 16) {
             echo new Exception("uniqid $uniqid is invalid");
-            return false;
+            return [];
         }
-        $ret = unpack('nworker_id/nlocal_port/Nself_id', pack('H*', $uniqid));
-        return $ret;
+        return unpack('nworker_id/nlocal_port/Nself_id', pack('H*', $uniqid));
     }
     /**
      * worker到 uniqid 的转换
@@ -567,7 +573,7 @@ class WorkerManSrv extends SrvBase
     {
         if (strlen($uniqid) !== 12) {
             echo new Exception("uniqid $uniqid is invalid");
-            return false;
+            return [];
         }
         return unpack('nlocal_port/Nself_id', pack('H*', $uniqid));
     }
@@ -603,10 +609,7 @@ class WorkerManSrv extends SrvBase
             return true;
         }
         //只要send不返回false并且网络没有断开，而且客户端接收正常，数据基本上可以看做100%能发到对方的。
-        if ($connection) {
-            return false !== $connection->send($data); //true null false
-        }
-        return false;
+        return false !== $connection->send($data); //true null false
     }
     public function close($fd)
     {
@@ -644,7 +647,7 @@ class WorkerManSrv extends SrvBase
         return is_array($req) ? $req['rawbody'] : $req->rawBody();
     }
     /**
-     * @param \Workerman\Connection\TcpConnection $connection
+     * @param TcpConnection $connection
      * @param $code
      * @param $header
      * @param $content
@@ -681,9 +684,10 @@ class WorkerManSrv extends SrvBase
         Worker::runAll();
     }
     final public function getConnection($fd) //仅读取主要服务用于发送消息
-    {if (self::$fdConnection) {
-        return self::$fdConnection ;
-    }
+    {
+        if (self::$fdConnection) {
+            return self::$fdConnection;
+        }
         $uniqid = '';
         $client = self::uniqIdToClient($fd);
         if ($client) {
@@ -691,16 +695,16 @@ class WorkerManSrv extends SrvBase
             $fd = $client['self_id'];
         }
         return isset(self::$workers[$uniqid]) ? self::$workers[$uniqid]->connections[$fd] : null;
-        $worker = $uniqid && isset(self::$workers[$uniqid]) ? self::$workers[$uniqid] : $this->server;
+        //$worker = $uniqid && isset(self::$workers[$uniqid]) ? self::$workers[$uniqid] : $this->server;
         #$connection = isset($worker->connections[$fd]) ? $worker->connections[$fd] : null;
-        return $connection;
+        //return $connection;
     }
     //reload -g会等所有客户端连接断开后重启 stop -g会等所有客户端连接断开后关闭
 
     final public function relog()
     {
         Worker::$logFile && file_put_contents(Worker::$logFile, '', LOCK_EX);
-        Worker::safeEcho('['.Worker::$logFile.'] relog ok!', PHP_EOL);
+        Worker::safeEcho('[' . Worker::$logFile . '] relog ok!' . PHP_EOL);
         return true;
     }
 

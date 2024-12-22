@@ -13,7 +13,7 @@ abstract class SrvTimer
         $this->timerFile = SrvBase::$instance->getConfig('timer_file'); //, SrvBase::$instance->runDir .'/timer.json' //无定时记录文件时 定时重启后失效
         $this->shmFile =  $this->timerFile ? '/dev/shm/'.str_replace(['/','\\'], '', SrvBase::$instance->serverName().'_'.$this->timerFile) : '';
         //定时处理载入
-        $time_dir = SrvBase::$instance->getConfig('timer_dir', APP_PATH.'/timer');
+        $time_dir = SrvBase::$instance->getConfig('timer_dir', SrvBase::$instance->runDir . '/timer');
         is_dir($time_dir) && myphp::class_dir($time_dir);
     }
     //销毁定时内存缓存配置
@@ -25,28 +25,29 @@ abstract class SrvTimer
     }
 
     /**
-     * @param null $data  null时读取
-     * @return mixed
+     * @param array|null $data  null时读取
+     * @return array|true
      */
-    public function timer($data = null)
+    public function timer(array $data = null)
     {
-        $timerFile =  $this->timerFile;
         if ($data === null) {
             if ($this->shmFile && file_exists($this->shmFile)) {
-                $data = file_get_contents($this->shmFile);
-            } elseif (is_file($timerFile)) {
-                $data = file_get_contents($timerFile);
+                $t = file_get_contents($this->shmFile);
+            } elseif (is_file($this->timerFile)) {
+                $t = file_get_contents($this->timerFile);
                 if ($this->shmFile && !is_file($this->shmFile) && is_dir('/dev/shm')) {
-                    file_put_contents($this->shmFile, $data, LOCK_EX); //生成初始的内存缓存文件
-                    echo 'timer cache shm ok!',PHP_EOL;
+                    file_put_contents($this->shmFile, $t, LOCK_EX); //生成初始的内存缓存文件
+                    echo 'timer cache shm ok!', PHP_EOL;
                 }
+            } else {
+                return self::$timers; //没有定时配置时 返回进程内临时定时器
             }
-            return $data === null ? self::$timers : json_decode($data, true); //没有定时配置时 返回进程内临时定时器
+            return json_decode($t, true);
         }
-        if ($timerFile) { //记录定时
+        if ($this->timerFile) { //记录定时
             self::$timers = $data;
             $data = json_encode($data);
-            file_put_contents($timerFile, $data, LOCK_EX); //记录定时记录
+            file_put_contents($this->timerFile, $data, LOCK_EX); //记录定时记录
             if ($this->shmFile && is_dir('/dev/shm')) {
                 file_put_contents($this->shmFile, $data, LOCK_EX); //写入到内存缓存文件
             }
@@ -142,7 +143,7 @@ abstract class SrvTimer
             foreach ($timers as $k => $data) {
                 if ($data['worker_id'] == $worker_id && ($interval == 0 || $interval == $k)) {
                     $ret = $this->addTimer($data, true);
-                    echo self::msg(),toJson($ret),PHP_EOL;
+                    echo self::msg(), json_encode($ret), PHP_EOL;
                 }
             }
         }

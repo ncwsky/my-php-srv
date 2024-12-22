@@ -4,13 +4,14 @@ declare(strict_types=1);
 use Workerman\Connection\ConnectionInterface;
 use myphp\Control;
 use myphp\Helper;
+use Workerman\Connection\TcpConnection;
 
 class WorkerManEvent
 {
     //有新的连接进入时， $fd 是连接的文件描述符
-    public static function onConnect(ConnectionInterface $connection)
+    public static function onConnect(TcpConnection $connection)
     {
-        $fd = $connection->id;
+        //$fd = $connection->id;
     }
 
     /**
@@ -102,7 +103,7 @@ class WorkerManEvent
             $connection->send($data);
         }
         // 请求数达到xxx后退出当前进程，主进程会自动重启一个新的进程
-        if (SrvBase::$instance->max_request > 0 && ++$request_count > SrvBase::$instance->max_request) {
+        if (WorkerManSrv::$instance->max_request > 0 && ++$request_count > WorkerManSrv::$instance->max_request) {
             \Workerman\Worker::stopAll();
         }
     }
@@ -116,13 +117,13 @@ class WorkerManEvent
         return true;
     }
     //当连接的应用层发送缓冲区满时触发
-    public static function onBufferFull(ConnectionInterface $connection)
+    public static function onBufferFull(TcpConnection $connection)
     {
         //echo "bufferFull and do not send again\n";
         $connection->pauseRecv(); //暂停接收
     }
     //当连接的应用层发送缓冲区数据全部发送完毕时触发
-    public static function onBufferDrain(ConnectionInterface $connection)
+    public static function onBufferDrain(TcpConnection $connection)
     {
         //echo "buffer drain and continue send\n";
         $connection->resumeRecv(); //恢复接收
