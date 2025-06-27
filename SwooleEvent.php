@@ -52,7 +52,13 @@ class SwooleEvent
         if ($request->post) {
             $_POST = &$request->post;
         }
-        $_REQUEST = array_merge($_GET, $_POST);
+        if ($_POST && $_GET) {
+            $_REQUEST = array_merge($_GET, $_POST);
+        } elseif ($_POST) {
+            $_REQUEST = $_POST;
+        } else {
+            $_REQUEST = $_GET;
+        }
         foreach ($request->header as $k => $v) {
             $k = ($k == 'content-type' || $k == 'content-length' ? '' : 'HTTP_') . str_replace('-', '_', strtoupper($k));
             $_SERVER[$k] = $v;

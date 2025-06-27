@@ -37,7 +37,13 @@ class WorkerManEvent
             $_FILES = $data->file();
             $_GET = $data->get();
             $_POST = $data->post();
-            $_REQUEST = array_merge($_GET, $_POST);
+            if ($_POST && $_GET) {
+                $_REQUEST = array_merge($_GET, $_POST);
+            } elseif ($_POST) {
+                $_REQUEST = $_POST;
+            } else {
+                $_REQUEST = $_GET;
+            }
             $_SERVER['REMOTE_ADDR'] = $connection->getRemoteIp();
             $_SERVER['REMOTE_PORT'] = $connection->getRemotePort();
             $_SERVER['REQUEST_METHOD'] = $data->method();
