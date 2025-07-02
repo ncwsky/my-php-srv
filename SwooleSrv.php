@@ -341,8 +341,6 @@ class SwooleSrv extends SrvBase
             $server->on('Finish', function ($server, $task_id, $data) use ($event) {
                 if (isset($event['onFinish'])) {
                     call_user_func($event['onFinish'], $server, $task_id, $data);
-                } else {
-                    SwooleEvent::onFinish($server, $task_id, $data);
                 }
             });
         }

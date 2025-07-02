@@ -8,12 +8,6 @@ use Workerman\Connection\TcpConnection;
 
 class WorkerManEvent
 {
-    //有新的连接进入时， $fd 是连接的文件描述符
-    public static function onConnect(TcpConnection $connection)
-    {
-        //$fd = $connection->id;
-    }
-
     /**
      * 接收到数据时回调此函数
      * @param ConnectionInterface $connection
@@ -113,15 +107,7 @@ class WorkerManEvent
             \Workerman\Worker::stopAll();
         }
     }
-    //客户端连接关闭事件
-    public static function onClose(ConnectionInterface $connection)
-    {
-        if ((isset($connection->worker->type) && $connection->worker->type == SrvBase::TYPE_HTTP)) {
-            return true;
-        }
-        //todo
-        return true;
-    }
+
     //当连接的应用层发送缓冲区满时触发
     public static function onBufferFull(TcpConnection $connection)
     {
@@ -156,6 +142,5 @@ class WorkerManEvent
             }
         }, false);
         unset($_COOKIE, $_FILES, $_GET, $_POST, $_REQUEST, $_SERVER);
-        return true;
     }
 }
