@@ -31,7 +31,7 @@ abstract class SrvBase
      * @var Worker2[]|\Swoole\Server[]
      */
     public $childSrv = []; //多个监听时的子服务
-    protected $config;
+    public $config;
     protected $runFile;
     public $runDir;
     protected $pidFile;
@@ -62,10 +62,10 @@ abstract class SrvBase
         $this->runFile = $_SERVER['SCRIPT_FILENAME'];
         $this->runDir = realpath(dirname($this->runFile));
         $this->config = $config;
-        $this->pidFile = $this->getConfig('setting.pid_file', $this->runDir .'/server.pid');
-        $this->ip = $this->getConfig('ip', '0.0.0.0');
-        $this->port = $this->getConfig('port', 7900);
-        $this->task_worker_num = (int)$this->getConfig('setting.task_worker_num', 0);
+        $this->pidFile = $config['setting']['pid_file'] ?? $this->runDir . '/server.pid';
+        $this->ip = $config['ip'] ?? '0.0.0.0';
+        $this->port = $config['port'] ?? 7900;
+        $this->task_worker_num = isset($config['setting']['task_worker_num']) ? (int)$config['setting']['task_worker_num'] : 0;
 
         if (isset($config['setting']['logFile'])) {
             static::$logFile = $config['setting']['logFile'];
@@ -93,7 +93,7 @@ abstract class SrvBase
     }
     public function serverName()
     {
-        return $this->getConfig('name', basename($this->runFile, '.php'));
+        return $this->config['name'] ?? basename($this->runFile, '.php');
     }
     final protected function initMyPhp()
     {
@@ -101,7 +101,7 @@ abstract class SrvBase
             opcache_reset();
         }
         $this->hasInitMyPhp = true;
-        $worker_load = $this->getConfig('worker_load');
+        $worker_load = $this->config['worker_load'] ?? null;
         if ($worker_load) {
             if (!is_array($worker_load)) {
                 $worker_load = [$worker_load];

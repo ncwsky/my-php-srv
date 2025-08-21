@@ -21,6 +21,9 @@ class WorkerManEvent
         //如果有http请求需要判断处理
         if (WorkerManSrv::$isHttp || (isset($connection->worker->type) && $connection->worker->type == SrvBase::TYPE_HTTP)) {
             $_SESSION = null;
+            if (self::staticFile($connection, $data)) {
+                return;
+            }
             //引入session
             \myphp\Session::on(function () use ($data) {
                 return $data->session();
@@ -142,5 +145,47 @@ class WorkerManEvent
             }
         }, false);
         unset($_COOKIE, $_FILES, $_GET, $_POST, $_REQUEST, $_SERVER);
+    }
+
+    //处理静态文件配置
+    public static function staticFile($connection, $data)
+    {
+        if (empty(WorkerManSrv::$instance->config['setting']['static_path'])) {
+            return false;
+        }
+
+        $path = $data->path();
+        if ($path === '/') {
+            return false;
+        }
+        if (strpos($path, '%')) { //可能url编码
+            $path = urldecode($path);
+            if (
+                !$path ||
+                strpos($path, '/') !== false ||
+                strpos($path, '../') !== false ||
+                strpos($path, "\\") !== false ||
+                strpos($path, "\0") !== false
+            ) {
+                return false;
+            }
+        }
+        $file = WorkerManSrv::$instance->config['setting']['static_path'] . $path;
+        if (is_file($file) && pathinfo($file, PATHINFO_EXTENSION) !== 'php') {
+            $response = new \Workerman\Protocols\Http\Response();
+            $ifModifiedSince = $data->header('if-modified-since');
+            if ($ifModifiedSince !== null && ($mtime = filemtime($file))) {
+                if ($ifModifiedSince === gmdate('D, d M Y H:i:s', $mtime) . ' GMT') {
+                    GetC('log_level') == 0 && \myphp\Log::trace('[' . $data->method() . ']' . $connection->getRemoteIp() . ' 304 ' . $data->uri());
+                    $connection->send($response->withStatus(304));
+                    return true;
+                }
+            }
+
+            GetC('log_level') == 0 && \myphp\Log::trace('[' . $data->method() . ']' . $connection->getRemoteIp() . ' ' . $data->uri());
+            $connection->send($response->withFile($file));
+            return true;
+        }
+        return false;
     }
 }
