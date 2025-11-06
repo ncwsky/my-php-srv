@@ -28,7 +28,7 @@ abstract class SrvTimer
      * @param array|null $data  null时读取
      * @return array|true
      */
-    public function timer(array $data = null)
+    public function timer(?array $data = null)
     {
         if ($data === null) {
             if ($this->shmFile && file_exists($this->shmFile)) {
