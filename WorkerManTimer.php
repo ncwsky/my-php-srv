@@ -1,7 +1,7 @@
 <?php
 
 declare(strict_types=1);
-use Workerman\Lib\Timer;
+use Workerman\Timer;
 
 //定时处理
 class WorkerManTimer extends SrvTimer

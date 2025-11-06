@@ -10,4 +10,4 @@ parameters:
         - '#Function GetC not found.#'
         - '#Method Swoole\\Server::reload\(\) invoked with 1 parameter#'
         - '#Empty array passed to foreach.#'
-        - '#Property Workerman\\Connection\\TcpConnection::\$protocol#'
+        - '#Call to function method_exists\(\) with \$this#'

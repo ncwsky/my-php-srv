@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Workerman\Connection\TcpConnection;
 use Workerman\Worker;
-use Workerman\Lib\Timer;
+use Workerman\Timer;
 
 /**
  * Class Worker2
