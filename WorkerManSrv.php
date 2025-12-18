@@ -245,6 +245,15 @@ class WorkerManSrv extends SrvBase
         if (isset($event['onConnect'])) {
             $server->onConnect = $event['onConnect']; // args: $connection
         }
+        if ($this->getConfig('type') == self::TYPE_WEB_SOCKET) {
+            if (isset($event['onWebSocketConnect'])) { //before websocket handshake
+                $server->onWebSocketConnect = $event['onWebSocketConnect']; // args: $connection, $data
+            }
+            if (isset($event['onWebSocketConnected'])) { //after websocket handshake
+                $server->onWebSocketConnected = $event['onWebSocketConnected']; // args: $connection, $data
+            }
+        }
+
         if (isset($event['onMessage'])) {
             $server->onMessage = $event['onMessage']; // args: $connection, $data
         } else {

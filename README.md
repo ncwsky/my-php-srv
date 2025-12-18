@@ -38,9 +38,9 @@ $srv->run($argv);
 **Workerman Event**  
 onWorkerStart|onWorkerReload(Workerman\Worker $worker)  
 `udp是无连接的，所以当使用udp时不会触发onConnect回调，也不会触发onClose回调`  
-onConnect|onClose|onBufferFull|onBufferDrain(Workerman\Connection\TcpConnection TcpConnection $connection)  
-`当客户端通过连接发来数据时(Workerman收到数据时)触发的回调函数`  
-onMessage(Workerman\Connection\TcpConnection TcpConnection $connection, string|Workerman\Protocols\Http\Request $data)  
+onConnect|onClose|onBufferFull|onBufferDrain(Workerman\Connection\TcpConnection $connection)  
+`ws协议握手、当客户端通过连接发来数据时(Workerman收到数据时)触发的回调函数`  
+onWebSocketConnect|onWebSocketConnected|onMessage(Workerman\Connection\TcpConnection $connection, string|Workerman\Protocols\Http\Request $data)  
 `当客户端的连接上发生错误时触发`  
 onError(Workerman\Connection\TcpConnection $connection, $code, $msg)
 > $fd = $connection->id;

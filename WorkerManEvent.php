@@ -9,6 +9,21 @@ use Workerman\Connection\TcpConnection;
 class WorkerManEvent
 {
     /**
+     * ws协议握手
+     * @param TcpConnection $connection
+     * @param \Workerman\Protocols\Http\Request|string $data
+     * @return void
+     */
+    /*
+    public static function onWebSocketConnect(TcpConnection $connection, $data)
+    {
+        if ($data->header('origin') != 'https://www.workerman.net') {
+            $connection->close();
+        }
+        var_dump($data->get());
+        var_dump($data->header());
+    }*/
+    /**
      * 接收到数据时回调此函数
      * @param ConnectionInterface $connection
      * @param string|\Workerman\Protocols\Http\Request $data
