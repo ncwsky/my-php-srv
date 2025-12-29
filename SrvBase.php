@@ -182,31 +182,15 @@ abstract class SrvBase
         }
         return true;
     }
+
     /**
      * Safe Echo.
      * @param string $msg
-     * @return bool
+     * @param bool $decorated
      */
-    public static function safeEcho($msg)
+    public static function safeEcho(string $msg, bool $decorated = false): void
     {
-        $stream = \STDOUT;
-
-        $line = $white = $green = $end = '';
-        //输出装饰
-        $line = "\033[1A\n\033[K";
-        $white = "\033[47;30m";
-        $green = "\033[32;40m";
-        $end = "\033[0m";
-
-        $msg = \str_replace(['<n>', '<w>', '<g>'], [$line, $white, $green], $msg);
-        $msg = \str_replace(['</n>', '</w>', '</g>'], $end, $msg);
-        set_error_handler(function () {
-            return true;
-        });
-        \fwrite($stream, $msg);
-        \fflush($stream);
-        restore_error_handler();
-        return true;
+        \Workerman\Worker::safeEcho($msg);
     }
 
     /****** 分隔线 ******/
