@@ -83,6 +83,30 @@ class WorkerManSrv extends SrvBase
         $this->pidFile = $this->getConfig('setting.pidFile', $this->runDir .'/server.pid');
         $this->runLock = $this->runDir.'/runLock';
         $this->max_request = $this->getConfig('setting.max_request', 0);
+
+        Worker::$daemonize = self::$isConsole ? false : true; //守护进程化;
+        if (isset($this->config['setting']['statusFile'])) {
+            Worker::$statusFile = $this->config['setting']['statusFile'];
+            unset($this->config['setting']['statusFile']);
+        }
+        if (isset($this->config['setting']['stdoutFile'])) {
+            Worker::$stdoutFile = $this->config['setting']['stdoutFile'];
+            unset($this->config['setting']['stdoutFile']);
+        }
+        if (isset($this->config['setting']['pidFile'])) {
+            Worker::$pidFile = $this->config['setting']['pidFile'];
+            unset($this->config['setting']['pidFile']);
+        } elseif (isset($this->config['setting']['pid_file'])) { //兼容处理
+            Worker::$pidFile = $this->config['setting']['pid_file'];
+            unset($this->config['setting']['pid_file']);
+        }
+        if (isset($this->config['setting']['logFile'])) {
+            Worker::$logFile = $this->config['setting']['logFile'];
+            unset($this->config['setting']['logFile']);
+        } elseif (isset($this->config['setting']['log_file'])) { //兼容处理
+            Worker::$logFile = $this->config['setting']['log_file'];
+            unset($this->config['setting']['log_file']);
+        }
     }
     /** 此事件在Worker进程启动时发生 这里创建的对象可以在进程生命周期内使用 如mysql/redis...
      * @param Worker2 $worker
@@ -145,29 +169,6 @@ class WorkerManSrv extends SrvBase
     //初始服务
     final public function init()
     {
-        Worker::$daemonize = self::$isConsole ? false : true; //守护进程化;
-        if (isset($this->config['setting']['statusFile'])) {
-            Worker::$statusFile = $this->config['setting']['statusFile'];
-            unset($this->config['setting']['statusFile']);
-        }
-        if (isset($this->config['setting']['stdoutFile'])) {
-            Worker::$stdoutFile = $this->config['setting']['stdoutFile'];
-            unset($this->config['setting']['stdoutFile']);
-        }
-        if (isset($this->config['setting']['pidFile'])) {
-            Worker::$pidFile = $this->config['setting']['pidFile'];
-            unset($this->config['setting']['pidFile']);
-        } elseif (isset($this->config['setting']['pid_file'])) { //兼容处理
-            Worker::$pidFile = $this->config['setting']['pid_file'];
-            unset($this->config['setting']['pid_file']);
-        }
-        if (isset($this->config['setting']['logFile'])) {
-            Worker::$logFile = $this->config['setting']['logFile'];
-            unset($this->config['setting']['logFile']);
-        } elseif (isset($this->config['setting']['log_file'])) { //兼容处理
-            Worker::$logFile = $this->config['setting']['log_file'];
-            unset($this->config['setting']['log_file']);
-        }
         $context = $this->getConfig('context', []); //资源上下文
         if ($this->task_worker_num) {
             //创建进程通信服务
@@ -631,12 +632,11 @@ class WorkerManSrv extends SrvBase
 
     /** 获取客户端信息
      * @param int $fd
-     * @param \Workerman\Connection\ConnectionInterface $conn
      * @return array|null
      */
-    public function clientInfo($fd, $conn = null)
+    public function clientInfo($fd)
     {
-        $connection = $conn ? $conn : $this->getConnection($fd);
+        $connection = $this->server->connections[$fd] ?? null;
         if ($connection) {
             return [
                 'remote_ip' => $connection->getRemoteIp(),
@@ -713,7 +713,8 @@ class WorkerManSrv extends SrvBase
     final public function relog()
     {
         Worker::$logFile && file_put_contents(Worker::$logFile, '', LOCK_EX);
-        Worker::safeEcho('[' . Worker::$logFile . '] relog ok!' . PHP_EOL);
+
+        self::safeEcho('[' . Worker::$logFile . '] relog ok!' . PHP_EOL);
         return true;
     }
 
