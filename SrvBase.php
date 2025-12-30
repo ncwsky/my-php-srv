@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+
 defined('SIGTERM') || define('SIGTERM', 15); //中止服务
 defined('SIGUSR1') || define('SIGUSR1', 10); //柔性重启
 defined('SIGRTMIN') || define('SIGRTMIN', 34); //SIGRTMIN信号重新打开日志文件
@@ -135,7 +136,7 @@ abstract class SrvBase
         restore_error_handler();
     }
     //workerman环境检测
-    public static function workermanCheck()
+    public static function workermanCheck(): bool
     {
         if (\DIRECTORY_SEPARATOR !== '\\') { //非win
             if (!in_array("pcntl", get_loaded_extensions())) {
@@ -186,11 +187,24 @@ abstract class SrvBase
     /**
      * Safe Echo.
      * @param string $msg
-     * @param bool $decorated
      */
-    public static function safeEcho(string $msg, bool $decorated = false): void
+    public static function safeEcho(string $msg): void
     {
-        \Workerman\Worker::safeEcho($msg);
+        $stream = defined('STDOUT') ? STDOUT : (@fopen('php://stdout', 'w') ?: fopen('php://output', 'w'));
+        //输出装饰
+        $line = "\033[1A\n\033[K";
+        $white = "\033[47;30m";
+        $green = "\033[32;40m";
+        $end = "\033[0m";
+
+        $msg = \str_replace(['<n>', '<w>', '<g>'], [$line, $white, $green], $msg);
+        $msg = \str_replace(['</n>', '</w>', '</g>'], $end, $msg);
+        set_error_handler(function () {
+            return true;
+        });
+        \fwrite($stream, $msg);
+        \fflush($stream);
+        restore_error_handler();
     }
 
     /****** 分隔线 ******/
@@ -237,21 +251,12 @@ abstract class SrvBase
     /** 连接信息
      * @param int $fd
      *
-     * @return array|null
+     * @return array|null|false
      */
-    abstract public function clientInfo($fd);
+    abstract public function clientInfo(int $fd);
     //获取http时传入的header 及 rawBody
     abstract public function getHeader($req);
     abstract public function getRawBody($req);
-    /**
-     * 发送http数据
-     * @param $response
-     * @param $code
-     * @param $header
-     * @param $content
-     * @return void
-     */
-    abstract public function httpSend($response, $code, &$header, &$content);
     //初始服务
     abstract protected function init();
     //运行
@@ -382,32 +387,30 @@ abstract class SrvBase
 
     /**
      * tcp|websocket close
-     * @param \Workerman\Connection\TcpConnection|\Swoole\Server $con
      * @param int $fd
      * @param string $msg
      */
-    public static function toClose($con, $fd = 0, $msg = null)
+    public static function toClose(int $fd = 0, string $msg = ''): void
     {
         if (self::$instance->isWorkerMan) {
-            $con->close($msg);
+            self::$instance->server->connections[$fd]->close($msg);
         } else {
-            if ($msg) {
-                $con->send($fd, $msg);
+            if ($msg !== '') {
+                self::$instance->server->send($fd, $msg);
             }
-            $con->close($fd);
+            self::$instance->server->close($fd);
         }
     }
 
     /**
      * tcp|websocket send
-     * @param \Workerman\Connection\TcpConnection|\Swoole\Server $con
      * @param int $fd
      * @param string $msg
      * @return bool|null
      */
-    public static function toSend($con, $fd, $msg)
+    public static function toSend(int $fd, string $msg): ?bool
     {
-        return self::$instance->isWorkerMan ? $con->send($msg) : $con->send($fd, $msg);
+        return self::$instance->isWorkerMan ? self::$instance->server->connections[$fd]->send($msg) : self::$instance->server->send($fd, $msg);
     }
 
     //json_encode 缩写

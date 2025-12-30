@@ -21,32 +21,34 @@ class Worker2 extends Worker
     public $isTask = false; #是否task进程
     public $channles = []; #记录worker用于通信
     public $onTask = null; #task进程回调
+
     /** 自定义间隔时钟
      * @param int $msec 毫秒
      * @param callable $callback
-     * @param array $args
-     * @return bool|int
+     * @param array|null $args
+     * @return int
      */
-    public function tick($msec, $callback, $args = [])
+    public function tick(int $msec, callable $callback, ?array $args = [])
     {
         return Timer::add(round($msec / 1000, 3), $callback, $args);
     }
+
     /** 自定义指定时间执行时钟
-     * @param $msec
-     * @param $callback
-     * @param array $args
-     * @return bool|int
+     * @param int $msec 毫秒
+     * @param callable $callback
+     * @param array|null $args
+     * @return int
      */
-    public function after($msec, $callback, $args = [])
+    public function after(int $msec, callable $callback, ?array $args = [])
     {
         return Timer::add(round($msec / 1000, 3), $callback, $args, false);
     }
 
     /**清除定时器
-     * @param $timer_id
+     * @param int $timer_id
      * @return bool
      */
-    public function clearTimer($timer_id)
+    public function clearTimer(int $timer_id): bool
     {
         return Timer::del($timer_id);
     }
@@ -77,7 +79,7 @@ class WorkerManSrv extends SrvBase
     public $server; //服务实例
 
     private $runLock = ''; #用于判定重载onStart处理
-    public function __construct($config)
+    public function __construct(array $config)
     {
         parent::__construct($config);
         $this->pidFile = $this->getConfig('setting.pidFile', $this->runDir .'/server.pid');
@@ -634,7 +636,7 @@ class WorkerManSrv extends SrvBase
      * @param int $fd
      * @return array|null
      */
-    public function clientInfo($fd)
+    public function clientInfo(int $fd): ?array
     {
         $connection = $this->server->connections[$fd] ?? null;
         if ($connection) {
@@ -655,26 +657,7 @@ class WorkerManSrv extends SrvBase
     {
         return is_array($req) ? $req['rawbody'] : $req->rawBody();
     }
-    /**
-     * @param TcpConnection $connection
-     * @param $code
-     * @param $header
-     * @param $content
-     */
-    public function httpSend($connection, $code, &$header, &$content)
-    {
-        // 发送状态码
-        $response = new \Workerman\Protocols\Http\Response($code);
-        // 发送头部信息
-        $response->withHeaders($header);
-        // 发送内容
-        if (is_string($content)) {
-            $content !== '' && $response->withBody($content);
-        } else {
-            $response->withBody(self::toJson($content));
-        }
-        $connection->send($response);
-    }
+
     final public function exec()
     {
         foreach ($this->childSrv as $childSrv) { //继承主服务

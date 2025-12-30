@@ -15,7 +15,7 @@ class SwooleSrv extends SrvBase
      * SwooleSrv constructor.
      * @param array $config
      */
-    public function __construct($config, $mode = SWOOLE_PROCESS)
+    public function __construct(array $config, $mode = SWOOLE_PROCESS)
     {
         parent::__construct($config);
         $this->mode = $mode;
@@ -391,7 +391,7 @@ class SwooleSrv extends SrvBase
     {
         return $this->server->close($fd);
     }
-    public function clientInfo($fd)
+    public function clientInfo(int $fd)
     {
         return $this->server->getClientInfo($fd);
     }
@@ -402,28 +402,6 @@ class SwooleSrv extends SrvBase
     public function getRawBody($req)
     {
         return is_array($req) ? $req['rawbody'] : $req->rawContent();
-    }
-    /**
-     * @param \Swoole\Http\Response $response
-     * @param $code
-     * @param $header
-     * @param $content
-     */
-    public function httpSend($response, $code, &$header, &$content)
-    {
-        // 发送状态码
-        $response->status($code);
-        // 发送头部信息
-        foreach ($header as $name => $val) {
-            $response->header($name, $val);
-        }
-        // 发送内容
-        if (is_string($content)) {
-            $content !== '' && $response->write($content);
-        } else {
-            $response->write(self::toJson($content));
-        }
-        $response->end();
     }
     final public function exec()
     {
