@@ -86,7 +86,6 @@ class WorkerManSrv extends SrvBase
         $this->runLock = $this->runDir.'/runLock';
         $this->max_request = $this->getConfig('setting.max_request', 0);
 
-        Worker::$daemonize = self::$isConsole ? false : true; //守护进程化;
         if (isset($this->config['setting']['statusFile'])) {
             Worker::$statusFile = $this->config['setting']['statusFile'];
             unset($this->config['setting']['statusFile']);
@@ -712,6 +711,7 @@ class WorkerManSrv extends SrvBase
             }
         }
         self::$isConsole = array_search('--console', $argv);
+        Worker::$daemonize = self::$isConsole ? false : true; //守护进程化;
         if ($action == '' || $action == '--console') {
             $action = 'start';
             $argv[1] = $action; //置启动参数

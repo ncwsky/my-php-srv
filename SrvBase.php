@@ -118,7 +118,6 @@ abstract class SrvBase
         } else {
             include $this->getConfig('conf_file', $this->runDir. '/conf.php') ;
             include $this->getConfig('myphp_dir', $this->runDir.'/myphp').'/base.php';
-            myphp::Analysis(false); //为myphp初始app目录自动载入
         }
     }
     final protected function setProcessTitle($title)
