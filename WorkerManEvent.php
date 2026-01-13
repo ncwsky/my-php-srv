@@ -34,7 +34,7 @@ class WorkerManEvent
         static $request_count = 0;
 
         //如果有http请求需要判断处理
-        if (WorkerManSrv::$isHttp || (isset($connection->worker->type) && $connection->worker->type == SrvBase::TYPE_HTTP)) {
+        if (WorkerManSrv::$isHttp || (isset($connection->context->type) && $connection->context->type == SrvBase::TYPE_HTTP)) {
             $_SESSION = null;
             if (self::staticFile($connection, $data)) {
                 return;
@@ -94,7 +94,7 @@ class WorkerManEvent
                 } else {
                     $response->withBody(Helper::toJson(Control::ok(['task_id' => $task_id])));
                 }
-                $connection->send($response);
+                $connection->send((string)$response);
             } else {
                 //myphp::setEnv('headers', $data->header());
                 myphp::req()->setHeaders($data->header());
@@ -111,10 +111,10 @@ class WorkerManEvent
                     if ($res->file) { //发送文件 [$file, $offset, $size]
                         $response->withFile($res->file[0], $res->file[1], $res->file[2]);
                     } else { // 发送内容
-                        $data = is_scalar($res->body) ? $res->body : Helper::toJson($res->body);
+                        $data = is_scalar($res->body) ? (string)$res->body : Helper::toJson($res->body);
                         $data !== '' && $response->withBody($data);
                     }
-                    $connection->send($response);
+                    $connection->send((string)$response);
                 }, false);
             }
         } else {

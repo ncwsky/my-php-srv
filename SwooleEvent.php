@@ -81,7 +81,7 @@ class SwooleEvent
                 if ($res->file) { //发送文件 [$file, $offset, $size]
                     $response->sendfile($res->file[0], $res->file[1], $res->file[2]);
                 } else { // 发送内容
-                    $data = is_scalar($res->body) ? $res->body : Helper::toJson($res->body);
+                    $data = is_scalar($res->body) ? (string)$res->body : Helper::toJson($res->body);
                     $data !== '' && $response->write($data);
                     $response->end();
                 }
