@@ -114,7 +114,7 @@ class WorkerManEvent
                         $data = is_scalar($res->body) ? (string)$res->body : Helper::toJson($res->body);
                         $data !== '' && $response->withBody($data);
                     }
-                    $connection->send((string)$response);
+                    $connection->send($response);
                 }, false);
             }
         } else {
