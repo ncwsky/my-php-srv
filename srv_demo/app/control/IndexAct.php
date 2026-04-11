@@ -12,6 +12,10 @@ class IndexAct extends \myphp\Control
         header('Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept'); //跨域测试
         header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE'); //跨域测试
     }
+	public function date()
+	{
+		return date('Y-m-d H:i:s');
+	}
     public function index()
     {
         $url = Q('get.url:273'); #validate_url: 273

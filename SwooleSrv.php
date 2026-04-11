@@ -3,6 +3,23 @@
 declare(strict_types=1);
 use Swoole\Server;
 
+defined('SWOOLE_VERSION') || define('SWOOLE_VERSION', 'unknown');
+
+// Swoole 进程模式
+defined('SWOOLE_PROCESS') || define('SWOOLE_PROCESS', 1);
+defined('SWOOLE_BASE') || define('SWOOLE_BASE', 0);
+
+// Socket 类型
+defined('SWOOLE_SOCK_TCP') || define('SWOOLE_SOCK_TCP', 1);
+defined('SWOOLE_SOCK_UDP') || define('SWOOLE_SOCK_UDP', 2);
+defined('SWOOLE_SOCK_TCP6') || define('SWOOLE_SOCK_TCP6', 3);
+defined('SWOOLE_SOCK_UDP6') || define('SWOOLE_SOCK_UDP6', 4);
+defined('SWOOLE_UNIX_STREAM') || define('SWOOLE_UNIX_STREAM', 5);
+defined('SWOOLE_UNIX_DGRAM') || define('SWOOLE_UNIX_DGRAM', 6);
+
+// SSL/TLS 支持标志
+defined('SWOOLE_SSL') || define('SWOOLE_SSL', 8);
+
 /**
  * Class SwooleSrv
  * @method onManagerStart(Server $server) //管理进程回调 有配置才会运行
@@ -10,12 +27,14 @@ use Swoole\Server;
  */
 class SwooleSrv extends SrvBase
 {
-    protected $mode; //运行模式 单线程模式（SWOOLE_BASE）| 进程模式（SWOOLE_PROCESS）[默认]
+    protected int $mode; //运行模式 单线程模式（SWOOLE_BASE）| 进程模式（SWOOLE_PROCESS）[默认]
+
     /**
      * SwooleSrv constructor.
      * @param array $config
+     * @param int $mode
      */
-    public function __construct(array $config, $mode = SWOOLE_PROCESS)
+    public function __construct(array $config, int $mode = SWOOLE_PROCESS)
     {
         parent::__construct($config);
         $this->mode = $mode;
@@ -35,6 +54,14 @@ class SwooleSrv extends SrvBase
         }
         unset($config['setting']['stdoutFile'], $config['setting']['protocol']);
         $this->pidFile = $this->getConfig('setting.pid_file', $this->runDir . '/server.pid');
+
+        if (isset($config['setting']['static_path'])) { //静态文件目录
+            if ($config['setting']['static_path']) {
+                $config['setting']['document_root'] = $config['setting']['static_path']; // v4.4.0以下版本, 此处必须为绝对路径
+                $config['setting']['enable_static_handler'] = true;
+            }
+            unset($config['setting']['static_path']);
+        }
     }
     //此事件在Server正常结束时发生
     public function onShutdown(Server $server)
@@ -64,7 +91,7 @@ class SwooleSrv extends SrvBase
             $this->onManagerStop($server);
         }
         if (method_exists($this, 'onStop')) {
-            !$this->hasInitMyPhp && $this->initMyPhp();
+            !$this->hasInitLoadPhp && $this->initLoadPhp();
             $this->onStop();
         }
         SrvTimer::destroy();
@@ -73,9 +100,9 @@ class SwooleSrv extends SrvBase
      * @param \Swoole\Server $server
      * @param int $worker_id [0-$worker_num)区间内的数字
      */
-    final public function _onWorkerStart(Server $server, $worker_id)
+    final public function _onWorkerStart(Server $server, int $worker_id)
     {
-        $this->initMyPhp();
+        $this->initLoadPhp();
         self::$_SERVER = $_SERVER; //存放初始的$_SERVER
 
         if (!$server->taskworker) { //worker进程
@@ -88,9 +115,8 @@ class SwooleSrv extends SrvBase
                 $timer = new SwooleTimer();
                 $timer->start($worker_id);
             }
-        } else { //task进程
-
-        }
+        }# else { //task进程
+        #}
 
         if ($worker_id >= $server->setting['worker_num']) {
             cli_set_process_title($this->serverName()."-{$worker_id}-Task");
@@ -106,7 +132,7 @@ class SwooleSrv extends SrvBase
      * @param Server $server
      * @param int $worker_id
      */
-    final public function _onWorkerStop(Server $server, $worker_id)
+    final public function _onWorkerStop(Server $server, int $worker_id)
     {
         if (!$server->taskworker) { //worker进程  异常结束后执行的逻辑
             static::safeEcho('Worker Stop clear' . PHP_EOL);
@@ -121,7 +147,7 @@ class SwooleSrv extends SrvBase
      * @param Server $server
      * @param int $worker_id
      */
-    public function onWorkerExit(Server $server, $worker_id)
+    public function onWorkerExit(Server $server, int $worker_id)
     {
         //todo
         /*if($timers = (new SwooleTimer())->timer()) { //直接读取配置文件
@@ -138,7 +164,7 @@ class SwooleSrv extends SrvBase
      * @param int $exit_code 退出的状态码，范围是 0～255
      * @param int $signal 进程退出的信号
      */
-    final public function _onWorkerError(Server $server, $worker_id, $worker_pid, $exit_code, $signal)
+    final public function _onWorkerError(Server $server, int $worker_id, int $worker_pid, int $exit_code, int $signal)
     {
         $err = date('Y-m-d H:i:s ') . '异常进程的编号:'.$worker_id.', 异常进程的ID:'.$worker_pid.', 退出的状态码:'.$exit_code.', 进程退出信号:'.$signal;
         static::safeEcho($err.PHP_EOL);
@@ -198,7 +224,7 @@ class SwooleSrv extends SrvBase
                 ];
                 return $ret[$type] ?? 'null';
             };
-            $port = (int)$this->port;
+            $port = $this->port;
             foreach ($listen as $k => $item) {
                 if (!isset($item['type'])) { // Socket 类型
                     $item['type'] = SWOOLE_SOCK_TCP;
@@ -269,7 +295,7 @@ class SwooleSrv extends SrvBase
             $server->on('Start', function ($server) {//回调有错误时 可能不会有主进程
                 $this->setProcessTitle($this->serverName() . '-master');
                 if (method_exists($this, 'onStart')) {
-                    $this->initMyPhp();
+                    $this->initLoadPhp();
                     $this->onStart();
                 }
             });
@@ -407,7 +433,7 @@ class SwooleSrv extends SrvBase
     {
         $this->server->start();
     }
-    final public function relog()
+    final public function reLog()
     {
         $logFile = $this->getConfig('setting.log_file', $this->runDir .'/server.log');
         if ($logFile) {
@@ -417,7 +443,6 @@ class SwooleSrv extends SrvBase
             posix_kill($pid, SIGRTMIN); //34  运行时日志不存在可重新打开日志文件
         }*/
         static::safeEcho('['.$logFile.'] relog ok!'.PHP_EOL);
-        return true;
     }
     public function run(&$argv)
     {
@@ -429,13 +454,13 @@ class SwooleSrv extends SrvBase
                 break;
             }
         }
-        self::$isConsole = array_search('--console', $argv);
+        self::$isConsole = (bool)array_search('--console', $argv);
         if ($action == '' || $action == '--console') {
             $action = 'start';
         }
         switch ($action) {
             case 'relog':
-                $this->relog();
+                $this->reLog();
                 break;
             case 'reloadTask':
                 $this->server->reload(true); //仅重启Task进程
