@@ -75,12 +75,31 @@ class WorkerManSrv extends SrvBase
     public static $taskAddr = '';
     public static $ipcWorker = null;
     public static $ipcSocketFile = '';
-    public static $fdConnection = null;
+
+    // chain 二进制协议: worker → ipc
+    const CH_REG        = 0x01; // [1][6B uniqidBin]
+    const CH_TO         = 0x02; // [1][8B globalFdBin][raw]
+    const CH_ALL        = 0x03; // [1][raw]
+    const CH_BIND       = 0x04; // [1][2B keyLen][key][8B globalFdBin]
+    const CH_UNBIND     = 0x05; // [1][2B keyLen][key][8B globalFdBin]
+    const CH_UNBIND_KEY = 0x06; // [1][2B keyLen][key]
+    const CH_UNBIND_FD  = 0x07; // [1][8B globalFdBin]
+    const CH_SEND_KEY   = 0x08; // [1][2B keyLen][key][raw]
+    // chain 二进制协议: ipc → worker
+    const CH_DELIVER    = 0x10; // [1][4B fdId][raw]
+    const CH_BROAD      = 0x11; // [1][raw]
+
+    /** 断线期间暂存的待发原始 payload */
+    public static array $chainPending = [];
+    /** remoteConnection 是否已连通 */
+    public static bool $chainConnected = false;
+    /** 断线时 pending 队列容量上限,超限丢弃最早条目 */
+    public static int $chainPendingMax = 10000;
 
     /**
      * @var Worker2
      */
-    public \Swoole\Server|Worker2 $server; //服务实例
+    public Worker2 $server; //服务实例
 
     private $runLock = ''; #用于判定重载onStart处理
     public function __construct(array $config)
@@ -141,7 +160,7 @@ class WorkerManSrv extends SrvBase
         }
 
         //连接到内部通信服务
-        $this->chainConnection($worker);
+        $this->ipcToConnection($worker);
 
         $this->onWorkerStart($worker, $worker_id);
     }
@@ -438,9 +457,9 @@ class WorkerManSrv extends SrvBase
             SrvTimer::destroy();
         };
     }
-    public static $remoteConnection = null;
+    public static $ipcConnection = null;
     //连接到内部通信服务
-    protected function chainConnection(Worker2 $worker)
+    protected function ipcToConnection(Worker2 $worker)
     {
         if (!$this->needChain() || !self::$ipcSocketFile) {
             return;
@@ -449,38 +468,64 @@ class WorkerManSrv extends SrvBase
         if (self::$ipcWorker && $worker === self::$ipcWorker) {
             return;
         }
+        //task 进程不接入 chain(其连接为 task 提交而非用户连接,避免被误广播)
+        if (!empty($worker->isTask)) {
+            return;
+        }
 
         //本进程 worker 登记(按 port+worker_id 唯一)
-        $uniqid = self::workerToUniqId((int)$worker->port, (int)$worker->id);
-        self::$workers[$uniqid] = $worker;
+        $uniqidHex = self::workerToUniqId($worker->port, $worker->id);
+        self::$workers[$uniqidHex] = $worker;
+        $uniqidBin = hex2bin($uniqidHex);
 
-        self::$remoteConnection = new \Workerman\Connection\AsyncTcpConnection('unix://' . self::$ipcSocketFile);
-        self::$remoteConnection->protocol = '\Workerman\Protocols\Frame';
-        self::$remoteConnection->onConnect = function ($connection) use ($uniqid) {
-            $connection->send(serialize(['a' => 'reg', 'uniqid' => $uniqid]));
-        };
-        self::$remoteConnection->onMessage = function ($connection, $data) use ($worker) {
-            $pos = strpos($data, '|');
-            if ($pos === false) {
-                return;
-            }
-            $fd  = (int)substr($data, 0, $pos);
-            $raw = substr($data, $pos + 1);
-            if ($fd === -1) { //群发
-                foreach ($worker->connections as $conn) {
-                    $conn->send($raw);
+        $conn = new \Workerman\Connection\AsyncTcpConnection('unix://' . self::$ipcSocketFile);
+        $conn->protocol = '\Workerman\Protocols\Frame';
+        $conn->onConnect = function ($connection) use ($uniqidBin) {
+            self::$chainConnected = true;
+            //REG 必须是连上后的第一条
+            $connection->send(chr(self::CH_REG) . $uniqidBin);
+            //断线期间暂存的消息补发
+            if (self::$chainPending) {
+                foreach (self::$chainPending as $p) {
+                    $connection->send($p);
                 }
-                return;
-            }
-            if (isset($worker->connections[$fd])) {
-                $worker->connections[$fd]->send($raw);
+                self::$chainPending = [];
             }
         };
-        self::$remoteConnection->onClose = function (\Workerman\Connection\AsyncTcpConnection $connection) {
-            // chain 断开 1 秒后重连,重连成功会自动重新 reg
+        $conn->onMessage = function ($connection, $data) use ($worker) {
+            if ($data === '' || !isset($data[0])) {
+                return;
+            }
+            $cmd = ord($data[0]);
+            if ($cmd === self::CH_DELIVER) {
+                //[1][4B fdId][raw]
+                if (strlen($data) < 5) {
+                    return;
+                }
+                $fdId = unpack('N', substr($data, 1, 4))[1];
+                $raw  = substr($data, 5);
+                if (isset($worker->connections[$fdId])) {
+                    $worker->connections[$fdId]->send($raw);
+                }
+            } elseif ($cmd === self::CH_BROAD) {
+                //[1][raw]
+                $raw = substr($data, 1);
+                foreach ($worker->connections as $c) {
+                    $c->send($raw);
+                }
+            }
+        };
+        $conn->onError = function ($connection, $code, $msg) {
+            self::$chainConnected = false;
+            Worker::safeEcho('chain err code='.$code.' msg='.$msg.PHP_EOL);
+        };
+        $conn->onClose = function (\Workerman\Connection\AsyncTcpConnection $connection) {
+            self::$chainConnected = false;
+            //chain 断开 1 秒后重连,重连成功会自动重新 REG 并 flush pending
             $connection->reConnect(1);
         };
-        self::$remoteConnection->connect();
+        self::$ipcConnection = $conn;
+        $conn->connect();
     }
 
     /** 是否需要启用内部通信通道 */
@@ -501,7 +546,7 @@ class WorkerManSrv extends SrvBase
     //
     public function childWorkerStart(Worker2 $worker)
     {
-        $this->chainConnection($worker);
+        $this->ipcToConnection($worker);
 
         $this->initLoadPhp();
         self::$_SERVER = $_SERVER; //存放初始的$_SERVER
@@ -521,147 +566,205 @@ class WorkerManSrv extends SrvBase
         $ipcWorker->count = 1; //chain 服务端独占单进程
         $ipcWorker->reloadable = false;
         $ipcWorker->protocol = '\Workerman\Protocols\Frame';
-        $ipcWorker->channels = []; //uniqid(worker) => connection
-        $ipcWorker->bindings = []; //key => [fd, fd, ...]   业务键 → 全局连接 fd
-        $ipcWorker->fdKeys   = []; //fd  => [key => 1]      反向索引,加速清理
-        //内部辅助闭包:把某个 fd 从 bindings / fdKeys 中全部移除
-        $dropFd = function ($fd) use ($ipcWorker) {
-            if (!isset($ipcWorker->fdKeys[$fd])) {
-                return;
-            }
-            foreach ($ipcWorker->fdKeys[$fd] as $key => $_) {
-                if (!isset($ipcWorker->bindings[$key])) {
-                    continue;
+        //全部键使用 raw binary,避免每条消息反复 hex 转换
+        $ipcWorker->channels  = []; //binWorkerUniqid(6B) => connection
+        $ipcWorker->bindings  = []; //key => [binGlobalFd(8B) => 1]
+        $ipcWorker->fdKeys    = []; //binGlobalFd => [key => 1]
+        $ipcWorker->uniqidFds = []; //binWorkerUniqid => [binGlobalFd => 1] 反向索引,供断连 O(1) 清理
+
+        //全局 fd 布局: [wid:n=2][port:n=2][fdid:N=4]  workerUniqid 布局: [port:n=2][wid:N=4]
+        $fdToUniqid = static function (string $fdBin): string {
+            //拼接: port(2) + wid 前缀补零(2) + wid(2) = port(2) + 4字节N(wid 放低位)
+            return substr($fdBin, 2, 2) . "\x00\x00" . substr($fdBin, 0, 2);
+        };
+
+        //删除一个 fd 的全部绑定(并同步 uniqidFds)
+        $dropFd = function (string $fdBin, ?string $uniqidBin) use ($ipcWorker) {
+            if (isset($ipcWorker->fdKeys[$fdBin])) {
+                foreach (array_keys($ipcWorker->fdKeys[$fdBin]) as $key) {
+                    if (isset($ipcWorker->bindings[$key][$fdBin])) {
+                        unset($ipcWorker->bindings[$key][$fdBin]);
+                        if (empty($ipcWorker->bindings[$key])) {
+                            unset($ipcWorker->bindings[$key]);
+                        }
+                    }
                 }
-                $ipcWorker->bindings[$key] = array_values(array_filter(
-                    $ipcWorker->bindings[$key],
-                    static fn($v) => $v !== $fd
-                ));
+                unset($ipcWorker->fdKeys[$fdBin]);
+            }
+            if ($uniqidBin !== null && isset($ipcWorker->uniqidFds[$uniqidBin][$fdBin])) {
+                unset($ipcWorker->uniqidFds[$uniqidBin][$fdBin]);
+                if (empty($ipcWorker->uniqidFds[$uniqidBin])) {
+                    unset($ipcWorker->uniqidFds[$uniqidBin]);
+                }
+            }
+        };
+        //从单个 key 中移除某个 fd
+        $dropFdFromKey = function (string $key, string $fdBin) use ($ipcWorker) {
+            if (isset($ipcWorker->bindings[$key][$fdBin])) {
+                unset($ipcWorker->bindings[$key][$fdBin]);
                 if (empty($ipcWorker->bindings[$key])) {
                     unset($ipcWorker->bindings[$key]);
                 }
             }
-            unset($ipcWorker->fdKeys[$fd]);
+            if (isset($ipcWorker->fdKeys[$fdBin][$key])) {
+                unset($ipcWorker->fdKeys[$fdBin][$key]);
+                if (empty($ipcWorker->fdKeys[$fdBin])) {
+                    unset($ipcWorker->fdKeys[$fdBin]);
+                }
+            }
         };
-        $ipcWorker->onMessage = function ($connection, $data) use ($ipcWorker, $dropFd) {
-            $data = @unserialize($data);
-            if (!is_array($data) || empty($data['a'])) {
+
+        $ipcWorker->onMessage = function ($connection, $data) use ($ipcWorker, $dropFd, $dropFdFromKey, $fdToUniqid) {
+            if ($data === '' || !isset($data[0])) {
                 return;
             }
-            switch ($data['a']) {
-                case 'to': //按全局 fd 指定转发
-                    $client = self::uniqIdToClient($data['fd'] ?? '');
-                    if (!$client) {
-                        Worker::safeEcho('chain to invalid fd:'.($data['fd'] ?? '').PHP_EOL);
+            $cmd = ord($data[0]);
+            $len = strlen($data);
+            switch ($cmd) {
+                case self::CH_REG: // [1][6B uniqidBin]
+                    if ($len !== 7) {
                         return;
                     }
-                    $uniqid = self::workerToUniqId($client['work_port'], $client['worker_id']);
-                    if (isset($ipcWorker->channels[$uniqid])) {
-                        $ipcWorker->channels[$uniqid]->send($client['fd_id'].'|'.$data['raw']);
+                    $uniqidBin = substr($data, 1, 6);
+                    //旧 channel 残留清理: 同 uniqid 在老连接未彻底 onClose 前又注册新连接
+                    if (isset($ipcWorker->channels[$uniqidBin]) && $ipcWorker->channels[$uniqidBin] !== $connection) {
+                        $old = $ipcWorker->channels[$uniqidBin];
+                        unset($old->chainUniqid); //防止老连接 onClose 误删新注册
+                        try {
+                            $old->close();
+                        } catch (\Throwable $e) {
+                        }
                     }
-                    break;
-                case 'all': //群发:发给所有已登记 worker
+                    $ipcWorker->channels[$uniqidBin] = $connection;
+                    $connection->chainUniqid = $uniqidBin;
+                    return;
+
+                case self::CH_TO: // [1][8B fdBin][raw]
+                    if ($len < 9) {
+                        return;
+                    }
+                    $fdBin = substr($data, 1, 8);
+                    $raw   = substr($data, 9);
+                    $uniqidBin = $fdToUniqid($fdBin);
+                    if (!isset($ipcWorker->channels[$uniqidBin])) {
+                        return;
+                    }
+                    //向目标 worker 发送 DELIVER: [0x10][4B fdId][raw]
+                    $ipcWorker->channels[$uniqidBin]->send(
+                        chr(self::CH_DELIVER) . substr($fdBin, 4, 4) . $raw
+                    );
+                    return;
+
+                case self::CH_ALL: // [1][raw]
+                    $out = chr(self::CH_BROAD) . substr($data, 1);
                     foreach ($ipcWorker->channels as $conn) {
-                        $conn->send('-1|'.$data['raw']);
+                        $conn->send($out);
                     }
-                    break;
-                case 'reg': //worker 登记
-                    if (empty($data['uniqid'])) {
+                    return;
+
+                case self::CH_BIND: // [1][2B keyLen][key][8B fdBin]
+                    if ($len < 11) {
                         return;
                     }
-                    $ipcWorker->channels[$data['uniqid']] = $connection;
-                    $connection->chainUniqid = $data['uniqid'];
-                    $chainData = self::uniqIdToWorker($data['uniqid']);
-                    if ($chainData) {
-                        Worker::safeEcho('ipc reg work_port:'.$chainData['work_port'].' worker_id:'.$chainData['fd_id'].PHP_EOL);
-                    }
-                    break;
-                case 'bind': //业务键绑定连接 {key, fd}
-                    $key = (string)($data['key'] ?? '');
-                    $fd  = (string)($data['fd']  ?? '');
-                    if ($key === '' || !self::uniqIdToClient($fd)) {
+                    $keyLen = unpack('n', substr($data, 1, 2))[1];
+                    if ($len !== 3 + $keyLen + 8) {
                         return;
                     }
-                    if (!isset($ipcWorker->bindings[$key])) {
-                        $ipcWorker->bindings[$key] = [];
-                    }
-                    if (!in_array($fd, $ipcWorker->bindings[$key], true)) {
-                        $ipcWorker->bindings[$key][] = $fd;
-                    }
-                    $ipcWorker->fdKeys[$fd][$key] = 1;
-                    break;
-                case 'unbind': //解绑 {key, fd?}; 不带 fd 则移除整个 key
-                    $key = (string)($data['key'] ?? '');
-                    if ($key === '' || !isset($ipcWorker->bindings[$key])) {
+                    $key   = substr($data, 3, $keyLen);
+                    $fdBin = substr($data, 3 + $keyLen, 8);
+                    $uniqidBin = $fdToUniqid($fdBin);
+                    //目标 worker 未注册时丢弃
+                    if (!isset($ipcWorker->channels[$uniqidBin])) {
                         return;
                     }
-                    $fd = (string)($data['fd'] ?? '');
-                    if ($fd !== '') {
-                        $ipcWorker->bindings[$key] = array_values(array_filter(
-                            $ipcWorker->bindings[$key],
-                            static fn($v) => $v !== $fd
-                        ));
-                        if (empty($ipcWorker->bindings[$key])) {
-                            unset($ipcWorker->bindings[$key]);
-                        }
-                        if (isset($ipcWorker->fdKeys[$fd][$key])) {
-                            unset($ipcWorker->fdKeys[$fd][$key]);
-                            if (empty($ipcWorker->fdKeys[$fd])) {
-                                unset($ipcWorker->fdKeys[$fd]);
-                            }
-                        }
-                    } else {
-                        foreach ($ipcWorker->bindings[$key] as $fdv) {
-                            if (isset($ipcWorker->fdKeys[$fdv][$key])) {
-                                unset($ipcWorker->fdKeys[$fdv][$key]);
-                                if (empty($ipcWorker->fdKeys[$fdv])) {
-                                    unset($ipcWorker->fdKeys[$fdv]);
+                    $ipcWorker->bindings[$key][$fdBin] = 1;
+                    $ipcWorker->fdKeys[$fdBin][$key] = 1;
+                    $ipcWorker->uniqidFds[$uniqidBin][$fdBin] = 1;
+                    return;
+
+                case self::CH_UNBIND: // [1][2B keyLen][key][8B fdBin]
+                    if ($len < 11) {
+                        return;
+                    }
+                    $keyLen = unpack('n', substr($data, 1, 2))[1];
+                    if ($len !== 3 + $keyLen + 8) {
+                        return;
+                    }
+                    $key   = substr($data, 3, $keyLen);
+                    $fdBin = substr($data, 3 + $keyLen, 8);
+                    $dropFdFromKey($key, $fdBin);
+                    return;
+
+                case self::CH_UNBIND_KEY: // [1][2B keyLen][key]
+                    if ($len < 3) {
+                        return;
+                    }
+                    $keyLen = unpack('n', substr($data, 1, 2))[1];
+                    if ($len !== 3 + $keyLen) {
+                        return;
+                    }
+                    $key = substr($data, 3, $keyLen);
+                    if (isset($ipcWorker->bindings[$key])) {
+                        foreach (array_keys($ipcWorker->bindings[$key]) as $fdBin) {
+                            if (isset($ipcWorker->fdKeys[$fdBin][$key])) {
+                                unset($ipcWorker->fdKeys[$fdBin][$key]);
+                                if (empty($ipcWorker->fdKeys[$fdBin])) {
+                                    unset($ipcWorker->fdKeys[$fdBin]);
                                 }
                             }
                         }
                         unset($ipcWorker->bindings[$key]);
                     }
-                    break;
-                case 'unbindFd': //客户端断开时一次性清理该 fd 的所有绑定 {fd}
-                    $fd = (string)($data['fd'] ?? '');
-                    if ($fd !== '') {
-                        $dropFd($fd);
-                    }
-                    break;
-                case 'sendKey': //按业务键投递 {key, raw}
-                    $key = (string)($data['key'] ?? '');
-                    if ($key === '' || empty($ipcWorker->bindings[$key])) {
+                    return;
+
+                case self::CH_UNBIND_FD: // [1][8B fdBin]
+                    if ($len !== 9) {
                         return;
                     }
-                    foreach ($ipcWorker->bindings[$key] as $fd) {
-                        $client = self::uniqIdToClient($fd);
-                        if (!$client) {
+                    $fdBin = substr($data, 1, 8);
+                    $dropFd($fdBin, $fdToUniqid($fdBin));
+                    return;
+
+                case self::CH_SEND_KEY: // [1][2B keyLen][key][raw]
+                    if ($len < 3) {
+                        return;
+                    }
+                    $keyLen = unpack('n', substr($data, 1, 2))[1];
+                    if ($len < 3 + $keyLen) {
+                        return;
+                    }
+                    $key = substr($data, 3, $keyLen);
+                    $raw = substr($data, 3 + $keyLen);
+                    if (empty($ipcWorker->bindings[$key])) {
+                        return;
+                    }
+                    foreach (array_keys($ipcWorker->bindings[$key]) as $fdBin) {
+                        $uniqidBin = $fdToUniqid($fdBin);
+                        if (!isset($ipcWorker->channels[$uniqidBin])) {
                             continue;
                         }
-                        $uniqid = self::workerToUniqId($client['work_port'], $client['worker_id']);
-                        if (isset($ipcWorker->channels[$uniqid])) {
-                            $ipcWorker->channels[$uniqid]->send($client['fd_id'].'|'.$data['raw']);
-                        }
+                        $ipcWorker->channels[$uniqidBin]->send(
+                            chr(self::CH_DELIVER) . substr($fdBin, 4, 4) . $raw
+                        );
                     }
-                    break;
+                    return;
             }
         };
         $ipcWorker->onClose = function ($connection) use ($ipcWorker, $dropFd) {
             if (empty($connection->chainUniqid)) {
                 return;
             }
-            $workerUniqid = $connection->chainUniqid;
-            unset($ipcWorker->channels[$workerUniqid]);
-            //按 fdKeys 反向索引,清理所有属于该崩溃 worker 的绑定
-            foreach (array_keys($ipcWorker->fdKeys) as $fd) {
-                $client = self::uniqIdToClient($fd);
-                if (!$client) {
-                    $dropFd($fd);
-                    continue;
+            $uniqidBin = $connection->chainUniqid;
+            //仅当该 connection 仍是当前 channel 才清理(reg 覆盖后的老连接关闭不影响新注册)
+            if (isset($ipcWorker->channels[$uniqidBin]) && $ipcWorker->channels[$uniqidBin] === $connection) {
+                unset($ipcWorker->channels[$uniqidBin]);
+            }
+            //反向索引 O(1) 清理该 worker 所有 fd 绑定
+            if (isset($ipcWorker->uniqidFds[$uniqidBin])) {
+                foreach (array_keys($ipcWorker->uniqidFds[$uniqidBin]) as $fdBin) {
+                    $dropFd($fdBin, null);
                 }
-                if (self::workerToUniqId($client['work_port'], $client['worker_id']) === $workerUniqid) {
-                    $dropFd($fd);
-                }
+                unset($ipcWorker->uniqidFds[$uniqidBin]);
             }
         };
         self::$ipcWorker = $ipcWorker;
@@ -671,28 +774,33 @@ class WorkerManSrv extends SrvBase
      * @param int|string $fd -1 表示群发,否则为 16 字符全局 hex fd
      * @param mixed $data 原始业务数据
      */
-    public static function chainTo(Worker2 $worker, $fd, $data): bool
+    public static function ipcTo(Worker2 $worker, $fd, $data): bool
     {
-        if (!self::$remoteConnection) {
-            Worker::safeEcho('chain not ready, drop send fd='.var_export($fd, true).PHP_EOL);
+        if ($fd === -1 || $fd === '-1') {
+            return self::ipcRawSend(chr(self::CH_ALL) . $data);
+        }
+        if (!is_string($fd) || strlen($fd) !== 16) {
+            Worker::safeEcho('ipcTo invalid fd='.var_export($fd, true).PHP_EOL);
             return false;
         }
-        $payload = [
-            'a'   => ($fd === -1 || $fd === '-1') ? 'all' : 'to',
-            'fd'  => $fd,
-            'raw' => $data,
-        ];
-        return false !== self::$remoteConnection->send(serialize($payload));
+        return self::ipcRawSend(chr(self::CH_TO) . hex2bin($fd) . $data);
     }
 
-    /** 向 chain 服务端发送一条指令(bind/unbind/unbindFd/sendKey 等) */
-    protected static function chainCmd(array $payload): bool
+    /** 把原始二进制 payload 发到 chain; 连接未就绪时进入 pending,连上后 flush */
+    protected static function ipcRawSend(string $payload): bool
     {
-        if (!self::$remoteConnection) {
-            Worker::safeEcho('chain not ready, drop cmd='.($payload['a'] ?? '').PHP_EOL);
+        if (!self::$ipcConnection) {
+            Worker::safeEcho('chain not init, drop '.strlen($payload).'B'.PHP_EOL);
             return false;
         }
-        return false !== self::$remoteConnection->send(serialize($payload));
+        if (!self::$chainConnected) {
+            if (count(self::$chainPending) >= self::$chainPendingMax) {
+                array_shift(self::$chainPending);
+            }
+            self::$chainPending[] = $payload;
+            return true;
+        }
+        return false !== self::$ipcConnection->send($payload);
     }
 
     /** 绑定业务键到连接(跨进程缓存于 chain 服务端内存)
@@ -701,11 +809,10 @@ class WorkerManSrv extends SrvBase
      */
     public function bind(string $key, TcpConnection $connection): bool
     {
-        return self::chainCmd([
-            'a'   => 'bind',
-            'key' => $key,
-            'fd'  => self::getUniqId($connection),
-        ]);
+        $fdHex = self::getUniqId($connection);
+        return self::ipcRawSend(
+            chr(self::CH_BIND) . pack('n', strlen($key)) . $key . hex2bin($fdHex)
+        );
     }
 
     /** 解绑业务键
@@ -714,30 +821,28 @@ class WorkerManSrv extends SrvBase
      */
     public function unbind(string $key, ?TcpConnection $connection = null): bool
     {
-        $payload = ['a' => 'unbind', 'key' => $key];
         if ($connection) {
-            $payload['fd'] = self::getUniqId($connection);
+            $fdHex = self::getUniqId($connection);
+            return self::ipcRawSend(
+                chr(self::CH_UNBIND) . pack('n', strlen($key)) . $key . hex2bin($fdHex)
+            );
         }
-        return self::chainCmd($payload);
+        return self::ipcRawSend(chr(self::CH_UNBIND_KEY) . pack('n', strlen($key)) . $key);
     }
 
     /** 一次性清理某个连接的全部绑定(在用户 onClose 中调用) */
     public function unbindFd(TcpConnection $connection): bool
     {
-        return self::chainCmd([
-            'a'  => 'unbindFd',
-            'fd' => self::getUniqId($connection),
-        ]);
+        $fdHex = self::getUniqId($connection);
+        return self::ipcRawSend(chr(self::CH_UNBIND_FD) . hex2bin($fdHex));
     }
 
     /** 按业务键跨进程投递数据 */
     public function sendByKey(string $key, $data): bool
     {
-        return self::chainCmd([
-            'a'   => 'sendKey',
-            'key' => $key,
-            'raw' => $data,
-        ]);
+        return self::ipcRawSend(
+            chr(self::CH_SEND_KEY) . pack('n', strlen($key)) . $key . (string)$data
+        );
     }
     /**
      * 通讯地址到 uniqid 的转换
@@ -772,7 +877,6 @@ class WorkerManSrv extends SrvBase
     public static function uniqIdToClient(string $uniqid): array
     {
         if (strlen($uniqid) !== 16) {
-            echo new Exception("uniqid $uniqid is invalid");
             return [];
         }
         return unpack('nworker_id/nwork_port/Nfd_id', pack('H*', $uniqid));
@@ -799,7 +903,6 @@ class WorkerManSrv extends SrvBase
     public static function uniqIdToWorker(string $uniqid): array
     {
         if (strlen($uniqid) !== 12) {
-            echo new Exception("uniqid $uniqid is invalid");
             return [];
         }
         return unpack('nwork_port/Nfd_id', pack('H*', $uniqid));
@@ -837,8 +940,8 @@ class WorkerManSrv extends SrvBase
     {
         //广播
         if ($fd === -1 || $fd === '-1') {
-            if (self::$remoteConnection) {
-                return self::chainTo($this->server, -1, $data);
+            if (self::$ipcConnection) {
+                return self::ipcTo($this->server, -1, $data);
             }
             //chain 未启用:降级为当前进程广播
             foreach ($this->server->connections as $conn) {
@@ -846,26 +949,16 @@ class WorkerManSrv extends SrvBase
             }
             return true;
         }
-        //全局 hex fd
-        if (is_string($fd) && strlen($fd) === 16 && ctype_xdigit($fd)) {
-            $connection = $this->getConnection($fd);
-            if ($connection) {
-                return false !== $connection->send($data);
-            }
-            return self::chainTo($this->server, $fd, $data);
+        //本进程命中直发
+        $connection = $this->getConnection($fd);
+        if ($connection) {
+            return false !== $connection->send($data);
         }
-        //本进程整数 fd
-        $fdInt = (int)$fd;
-        $connection = $this->server->connections[$fdInt] ?? null;
-        if (!$connection && !empty($this->childSrv)) {
-            foreach ($this->childSrv as $csrv) {
-                if (isset($csrv->connections[$fdInt])) {
-                    $connection = $csrv->connections[$fdInt];
-                    break;
-                }
-            }
+        //全局 hex fd 本进程未命中 → chain 转发到持有该连接的 worker
+        if (is_string($fd) && strlen($fd) === 16) {
+            return self::ipcTo($this->server, $fd, $data);
         }
-        return $connection && false !== $connection->send($data);
+        return false;
     }
     public function close($fd)
     {
@@ -887,7 +980,7 @@ class WorkerManSrv extends SrvBase
             return [
                 'remote_ip' => $connection->getRemoteIp(),
                 'remote_port' => $connection->getRemotePort(),
-                'server_port' => $connection->worker->port,
+                'server_port' => $connection->worker->port ?? $this->port,
             ];
         }
         return null;
@@ -918,18 +1011,35 @@ class WorkerManSrv extends SrvBase
 
         Worker::runAll();
     }
-    final public function getConnection($fd) //仅读取主要服务用于发送消息
+    /** 按 fd 取本进程内的 TcpConnection;跨进程的 fd 返回 null(调用方自行走 chain)
+     * @param int|string $fd
+     *   - 16 字符 hex 全局 fd: 若解析出的 uniqid 属于本进程 Worker,返回对应连接
+     *   - int / 其他: 视为本进程本地 fd,先查 main server,再查 childSrv
+     * @return TcpConnection|null
+     */
+    final public function getConnection($fd)
     {
-        if (self::$fdConnection) {
-            return self::$fdConnection;
-        }
-        $uniqid = '';
-        $client = self::uniqIdToClient($fd);
-        if ($client) {
+        //全局 hex fd
+        if (is_string($fd) && strlen($fd) === 16) {
+            $client = self::uniqIdToClient($fd);
+            if (!$client) {
+                return null;
+            }
             $uniqid = self::workerToUniqId($client['work_port'], $client['worker_id']);
-            $fd = $client['fd_id'];
+            $worker = self::$workers[$uniqid] ?? null;
+            return $worker->connections[$client['fd_id']] ?? null;
         }
-        return isset(self::$workers[$uniqid]) ? self::$workers[$uniqid]->connections[$fd] : null;
+        //本进程 int fd
+        $fdInt = (int)$fd;
+        if (isset($this->server->connections[$fdInt])) {
+            return $this->server->connections[$fdInt];
+        }
+        foreach ($this->childSrv as $csrv) {
+            if (isset($csrv->connections[$fdInt])) {
+                return $csrv->connections[$fdInt];
+            }
+        }
+        return null;
     }
     //reload -g会等所有客户端连接断开后重启 stop -g会等所有客户端连接断开后关闭
 
