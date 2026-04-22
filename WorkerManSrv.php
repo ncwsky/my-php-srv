@@ -25,6 +25,7 @@ class Worker2 extends Worker
     public array $channels;
     public array $bindings;
     public array $fdKeys;
+    public array $uniqidFds;
 
     /** 自定义间隔时钟
      * @param int $msec 毫秒
@@ -70,7 +71,6 @@ class WorkerManSrv extends SrvBase
 {
     public bool $isWorkerMan = true;
     public $max_request = 0;
-    public static $workers = []; //记录本进程的 worker(按 uniqid 索引)
     public static $taskWorker = null;
     public static $taskAddr = '';
     public static $ipcWorker = null;
@@ -457,6 +457,7 @@ class WorkerManSrv extends SrvBase
             SrvTimer::destroy();
         };
     }
+
     public static $ipcConnection = null;
     //连接到内部通信服务
     protected function ipcToConnection(Worker2 $worker)
@@ -474,16 +475,15 @@ class WorkerManSrv extends SrvBase
         }
 
         //本进程 worker 登记(按 port+worker_id 唯一)
-        $uniqidHex = self::workerToUniqId($worker->port, $worker->id);
-        self::$workers[$uniqidHex] = $worker;
-        $uniqidBin = hex2bin($uniqidHex);
+        $innerIdHex = self::workerToInnerId($worker->port, $worker->id);
+        $innerIdBin = hex2bin($innerIdHex);
 
         $conn = new \Workerman\Connection\AsyncTcpConnection('unix://' . self::$ipcSocketFile);
         $conn->protocol = '\Workerman\Protocols\Frame';
-        $conn->onConnect = function ($connection) use ($uniqidBin) {
+        $conn->onConnect = function ($connection) use ($innerIdBin) {
             self::$chainConnected = true;
             //REG 必须是连上后的第一条
-            $connection->send(chr(self::CH_REG) . $uniqidBin);
+            $connection->send(chr(self::CH_REG) . $innerIdBin);
             //断线期间暂存的消息补发
             if (self::$chainPending) {
                 foreach (self::$chainPending as $p) {
@@ -559,7 +559,12 @@ class WorkerManSrv extends SrvBase
         //拼接: port(2) + wid 前缀补零(2) + wid(2) = port(2) + 4字节N(wid 放低位)
         return substr($fdBin, 2, 2) . "\x00\x00" . substr($fdBin, 0, 2);
     }
-    //创建进程通信服务
+
+    /**
+     * ipc内部通信服务
+     * 各个worker进程之间通过 ipc 通信
+     * @return void
+     */
     public function ipcWorker()
     {
         self::$ipcSocketFile = (is_dir('/dev/shm') ? '/dev/shm' : $this->runDir) . '/' . $this->serverName() . '_ipc.sock';
@@ -772,12 +777,12 @@ class WorkerManSrv extends SrvBase
     }
     /** 通过 chain 通道把数据转发到目标 worker(或群发)
      * @param Worker2 $worker 当前 worker(保留参数用于将来扩展/日志)
-     * @param int|string $fd -1 表示群发,否则为 16 字符全局 hex fd
+     * @param string $fd -1 表示群发,否则为 16 字符全局 hex fd
      * @param mixed $data 原始业务数据
      */
     public static function ipcTo(Worker2 $worker, $fd, $data): bool
     {
-        if ($fd === -1 || $fd === '-1') {
+        if ($fd === '-1') {
             return self::ipcRawSend(chr(self::CH_ALL) . $data);
         }
         if (!is_string($fd) || strlen($fd) !== 16) {
@@ -819,6 +824,7 @@ class WorkerManSrv extends SrvBase
     /** 解绑业务键
      * @param string $key
      * @param TcpConnection|null $connection 为 null 时解绑该 key 的全部连接
+     * @return bool
      */
     public function unbind(string $key, ?TcpConnection $connection = null): bool
     {
@@ -883,30 +889,30 @@ class WorkerManSrv extends SrvBase
         return unpack('nworker_id/nwork_port/Nfd_id', pack('H*', $uniqid));
     }
     /**
-     * worker到 uniqid 的转换
+     * worker转换内部通信id
      *
-     * @param int $work_port
-     * @param int $fd_id
+     * @param int $worker_port
+     * @param int $worker_id
      * @return string
      */
-    public static function workerToUniqId($work_port, int $fd_id): string
+    public static function workerToInnerId(int $worker_port, int $worker_id): string
     {
-        return bin2hex(pack('nN', $work_port, $fd_id));
+        return bin2hex(pack('nN', $worker_port, $worker_id));
     }
 
     /**
-     * uniqid 到worker的转换
+     * 内部通信id转换worker
      *
      * @param string $uniqid
      * @return array
      * @throws Exception
      */
-    public static function uniqIdToWorker(string $uniqid): array
+    public static function innerIdToWorker(string $uniqid): array
     {
         if (strlen($uniqid) !== 12) {
             return [];
         }
-        return unpack('nwork_port/Nfd_id', pack('H*', $uniqid));
+        return unpack('nworker_port/Nworker_id', pack('H*', $uniqid));
     }
     public function workerId()
     {
@@ -939,19 +945,10 @@ class WorkerManSrv extends SrvBase
      */
     public function send($fd, $data)
     {
-        //广播
-        if ($fd === -1 || $fd === '-1') {
-            if (self::$ipcConnection) {
-                return self::ipcTo($this->server, -1, $data);
-            }
-            //chain 未启用:降级为当前进程广播
-            foreach ($this->server->connections as $conn) {
-                $conn->send($data);
-            }
-            return true;
-        }
         //本进程命中直发
-        $connection = $this->getConnection($fd);
+        if (is_int($fd)) { //当前进程fd
+            $connection = $this->server->connections[$fd] ?? null;
+        }
         if ($connection) {
             return false !== $connection->send($data);
         }
@@ -963,9 +960,14 @@ class WorkerManSrv extends SrvBase
     }
     public function close($fd)
     {
-        $connection = $this->getConnection($fd);
-        if ($connection) {
-            return $connection->close();
+        //本进程命中直发
+        if (is_int($fd)) {
+            $connection = $this->server->connections[$fd] ?? null;
+            if ($connection) {
+                return $connection->close();
+            }
+        } else { //内部通信转发
+            //todo 
         }
         return false;
     }
@@ -1012,32 +1014,13 @@ class WorkerManSrv extends SrvBase
 
         Worker::runAll();
     }
-    /** 按 fd 取本进程内的 TcpConnection;跨进程的 fd 返回 null(调用方自行走 chain)
-     * @param int|string $fd
-     *   - 16 字符 hex 全局 fd: 若解析出的 uniqid 属于本进程 Worker,返回对应连接
-     *   - int / 其他: 视为本进程本地 fd,先查 main server,再查 childSrv
+    /** 按 fd 取本进程内的 TcpConnection;
+     * @param int $fd
      * @return TcpConnection|null
      */
-    final public function getConnection($fd)
+    final public function getConnection(int $fd): ?TcpConnection
     {
-        if (is_int($fd)) { //当前进程fd
-            return $this->server->connections[$fd] ?? null;
-        }
-        //全局 hex fd
-        if (is_string($fd) && strlen($fd) === 16) {
-            $client = self::uniqIdToClient($fd);
-            if (!$client) {
-                return null;
-            }
-            $uniqid = self::workerToUniqId($client['work_port'], $client['worker_id']);
-            $worker = self::$workers[$uniqid] ?? null;
-            return $worker->connections[$client['fd_id']] ?? null;
-        }
-
-        foreach ($this->childSrv as $csrv) {
-            var_dump($csrv->connections);
-        }
-        return null;
+        return $this->server->connections[$fd] ?? null;
     }
     //reload -g会等所有客户端连接断开后重启 stop -g会等所有客户端连接断开后关闭
 
