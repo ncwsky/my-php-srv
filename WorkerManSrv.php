@@ -552,6 +552,13 @@ class WorkerManSrv extends SrvBase
         self::$_SERVER = $_SERVER; //存放初始的$_SERVER
         #Worker::safeEcho("childWorker init myphp:".$worker->id.PHP_EOL);
     }
+
+    //全局 fd 布局: [wid:n=2][port:n=2][fdid:N=4]  workerUniqid 布局: [port:n=2][wid:N=4]
+    public static function fdToUniqid(string $fdBin): string
+    {
+        //拼接: port(2) + wid 前缀补零(2) + wid(2) = port(2) + 4字节N(wid 放低位)
+        return substr($fdBin, 2, 2) . "\x00\x00" . substr($fdBin, 0, 2);
+    }
     //创建进程通信服务
     public function ipcWorker()
     {
@@ -563,7 +570,7 @@ class WorkerManSrv extends SrvBase
         $ipcWorker = new Worker2('unix://'.self::$ipcSocketFile);
         $ipcWorker->user = $this->getConfig('setting.user', '');
         $ipcWorker->name = $this->serverName().'_chain';
-        $ipcWorker->count = 1; //chain 服务端独占单进程
+        $ipcWorker->count = 1;
         $ipcWorker->reloadable = false;
         $ipcWorker->protocol = '\Workerman\Protocols\Frame';
         //全部键使用 raw binary,避免每条消息反复 hex 转换
@@ -571,12 +578,6 @@ class WorkerManSrv extends SrvBase
         $ipcWorker->bindings  = []; //key => [binGlobalFd(8B) => 1]
         $ipcWorker->fdKeys    = []; //binGlobalFd => [key => 1]
         $ipcWorker->uniqidFds = []; //binWorkerUniqid => [binGlobalFd => 1] 反向索引,供断连 O(1) 清理
-
-        //全局 fd 布局: [wid:n=2][port:n=2][fdid:N=4]  workerUniqid 布局: [port:n=2][wid:N=4]
-        $fdToUniqid = static function (string $fdBin): string {
-            //拼接: port(2) + wid 前缀补零(2) + wid(2) = port(2) + 4字节N(wid 放低位)
-            return substr($fdBin, 2, 2) . "\x00\x00" . substr($fdBin, 0, 2);
-        };
 
         //删除一个 fd 的全部绑定(并同步 uniqidFds)
         $dropFd = function (string $fdBin, ?string $uniqidBin) use ($ipcWorker) {
@@ -614,7 +615,7 @@ class WorkerManSrv extends SrvBase
             }
         };
 
-        $ipcWorker->onMessage = function ($connection, $data) use ($ipcWorker, $dropFd, $dropFdFromKey, $fdToUniqid) {
+        $ipcWorker->onMessage = function ($connection, $data) use ($ipcWorker, $dropFd, $dropFdFromKey) {
             if ($data === '' || !isset($data[0])) {
                 return;
             }
@@ -645,7 +646,7 @@ class WorkerManSrv extends SrvBase
                     }
                     $fdBin = substr($data, 1, 8);
                     $raw   = substr($data, 9);
-                    $uniqidBin = $fdToUniqid($fdBin);
+                    $uniqidBin = self::fdToUniqid($fdBin);
                     if (!isset($ipcWorker->channels[$uniqidBin])) {
                         return;
                     }
@@ -672,7 +673,7 @@ class WorkerManSrv extends SrvBase
                     }
                     $key   = substr($data, 3, $keyLen);
                     $fdBin = substr($data, 3 + $keyLen, 8);
-                    $uniqidBin = $fdToUniqid($fdBin);
+                    $uniqidBin = self::fdToUniqid($fdBin);
                     //目标 worker 未注册时丢弃
                     if (!isset($ipcWorker->channels[$uniqidBin])) {
                         return;
@@ -722,7 +723,7 @@ class WorkerManSrv extends SrvBase
                         return;
                     }
                     $fdBin = substr($data, 1, 8);
-                    $dropFd($fdBin, $fdToUniqid($fdBin));
+                    $dropFd($fdBin, self::fdToUniqid($fdBin));
                     return;
 
                 case self::CH_SEND_KEY: // [1][2B keyLen][key][raw]
@@ -739,7 +740,7 @@ class WorkerManSrv extends SrvBase
                         return;
                     }
                     foreach (array_keys($ipcWorker->bindings[$key]) as $fdBin) {
-                        $uniqidBin = $fdToUniqid($fdBin);
+                        $uniqidBin = self::fdToUniqid($fdBin);
                         if (!isset($ipcWorker->channels[$uniqidBin])) {
                             continue;
                         }
@@ -1019,6 +1020,9 @@ class WorkerManSrv extends SrvBase
      */
     final public function getConnection($fd)
     {
+        if (is_int($fd)) { //当前进程fd
+            return $this->server->connections[$fd] ?? null;
+        }
         //全局 hex fd
         if (is_string($fd) && strlen($fd) === 16) {
             $client = self::uniqIdToClient($fd);
@@ -1029,15 +1033,9 @@ class WorkerManSrv extends SrvBase
             $worker = self::$workers[$uniqid] ?? null;
             return $worker->connections[$client['fd_id']] ?? null;
         }
-        //本进程 int fd
-        $fdInt = (int)$fd;
-        if (isset($this->server->connections[$fdInt])) {
-            return $this->server->connections[$fdInt];
-        }
+
         foreach ($this->childSrv as $csrv) {
-            if (isset($csrv->connections[$fdInt])) {
-                return $csrv->connections[$fdInt];
-            }
+            var_dump($csrv->connections);
         }
         return null;
     }

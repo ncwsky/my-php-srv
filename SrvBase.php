@@ -230,14 +230,14 @@ abstract class SrvBase
     abstract public function task($data);
 
     /** 发送数据
-     * @param $fd
-     * @param $data
+     * @param int|string $fd
+     * @param mixed $data
      * @return bool
      */
     abstract public function send($fd, $data);
 
     /** 关闭连接
-     * @param $fd
+     * @param int|string $fd
      * @return bool
      */
     abstract public function close($fd);
