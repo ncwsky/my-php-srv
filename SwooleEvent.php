@@ -40,9 +40,7 @@ class SwooleEvent
             $_SERVER[$k] = $v;
         }
         //客户端的真实IP HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
-        if (isset($request->header['x-real-ip']) || isset($request->header['x-forwarded-for'])) {
-            Helper::$isProxy = true;
-        }
+        \myphp\Request::$isProxy = isset($request->header['x-real-ip']) || isset($request->header['x-forwarded-for']);
 
         GetC('log_level') == 0 && Log::trace('[' . $_SERVER['REQUEST_METHOD'] . ']' . Helper::getIp() . ' ' . $_SERVER["REQUEST_URI"] . ($_SERVER['REQUEST_METHOD'] == 'POST' ? PHP_EOL . 'post:' . Helper::toJson($_POST) : ''));
 

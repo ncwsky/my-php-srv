@@ -64,9 +64,8 @@ class WorkerManEvent
                 $_SERVER[$k] = $v;
             }
             //客户端的真实IP HTTP_X_REAL_IP HTTP_X_FORWARDED_FOR
-            if ($data->header('x-real-ip') || $data->header('x-forwarded-for')) {
-                Helper::$isProxy = true;
-            }
+            \myphp\Request::$isProxy = $data->header('x-real-ip') || $data->header('x-forwarded-for');
+
             $_SERVER['HTTP_HOST'] = $data->host();
             $_SERVER['SCRIPT_NAME'] = '/index.php';
             $_SERVER['PHP_SELF'] = $data->path();
