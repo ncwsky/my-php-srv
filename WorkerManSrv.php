@@ -22,10 +22,12 @@ class Worker2 extends Worker
      * @var ?callable
      */
     public $onTask = null; #task进程回调
-    public array $channels;
-    public array $bindings;
-    public array $fdKeys;
-    public array $uniqidFds;
+    public array $channels = [];
+    public array $bindings = [];
+    public array $fdKeys = [];
+    public array $uniqidFds = [];
+    /** worker 本地 bind 副本: key => [fdId => 1] 用于断线重连后向 hub 重放 CH_BIND */
+    public array $localBindings = [];
 
     /** 自定义间隔时钟
      * @param int $msec 毫秒
@@ -85,9 +87,11 @@ class WorkerManSrv extends SrvBase
     const CH_UNBIND_KEY = 0x06; // [1][2B keyLen][key]
     const CH_UNBIND_FD  = 0x07; // [1][8B globalFdBin]
     const CH_SEND_KEY   = 0x08; // [1][2B keyLen][key][raw]
+    const CH_CLOSE      = 0x09; // [1][8B globalFdBin] 请求关闭目标 worker 上的连接
     // chain 二进制协议: ipc → worker
     const CH_DELIVER    = 0x10; // [1][4B fdId][raw]
     const CH_BROAD      = 0x11; // [1][raw]
+    const CH_DO_CLOSE   = 0x12; // [1][4B fdId] 关闭本 worker 上的指定连接
 
     /** 断线期间暂存的待发原始 payload */
     public static array $chainPending = [];
@@ -95,11 +99,15 @@ class WorkerManSrv extends SrvBase
     public static bool $chainConnected = false;
     /** 断线时 pending 队列容量上限,超限丢弃最早条目 */
     public static int $chainPendingMax = 10000;
+    /** chain 重连退避:从 1 秒开始倍增,封顶 30 秒;onConnect 成功后复位 */
+    public static int $chainReconnectDelay = 1;
+    public static int $chainReconnectMax   = 30;
+    /** 已记录连续错误次数,用于日志限流(避免每秒一条刷屏) */
+    public static int $chainReconnectErrCount = 0;
 
     /**
-     * @var Worker2
+     * @var Worker2 父类 SrvBase 已声明 public Server|Worker2 $server,此处仅 PHPDoc 缩窄供 IDE 类型提示
      */
-    public Worker2 $server; //服务实例
 
     private $runLock = ''; #用于判定重载onStart处理
     public function __construct(array $config)
@@ -108,6 +116,11 @@ class WorkerManSrv extends SrvBase
         $this->pidFile = $this->getConfig('setting.pidFile', $this->runDir .'/server.pid');
         $this->runLock = $this->runDir.'/runLock';
         $this->max_request = $this->getConfig('setting.max_request', 0);
+        //chain 断线期间 pending 队列容量,允许配置覆盖
+        $cfgMax = (int)$this->getConfig('setting.chain_pending_max', 0);
+        if ($cfgMax > 0) {
+            self::$chainPendingMax = $cfgMax;
+        }
 
         if (isset($this->config['setting']['statusFile'])) {
             Worker::$statusFile = $this->config['setting']['statusFile'];
@@ -433,12 +446,12 @@ class WorkerManSrv extends SrvBase
         }
 
         Worker::$onMasterReload = function () use ($unixFiles) {
-            //清除unix-sock文件
+            //清除业务 unix-sock 文件 (这些 worker 会被 reload 重启,sock 需要重建)
             foreach ($unixFiles as $sockFile) {
                 file_exists($sockFile) && @unlink($sockFile);
             }
-
-            self::$ipcSocketFile && file_exists(self::$ipcSocketFile) && @unlink(self::$ipcSocketFile);
+            //ipcSocketFile 不在此处清理: ipcWorker reloadable=false,reload 期间 hub 仍在运行,
+            //sock 文件还要让 reload 后的新 worker 进程接入,不能删
         };
         #结束时销毁处理
         Worker::$onMasterStop = function () use ($unixFiles) {
@@ -480,10 +493,27 @@ class WorkerManSrv extends SrvBase
 
         $conn = new \Workerman\Connection\AsyncTcpConnection('unix://' . self::$ipcSocketFile);
         $conn->protocol = '\Workerman\Protocols\Frame';
-        $conn->onConnect = function ($connection) use ($innerIdBin) {
+        $conn->onConnect = function ($connection) use ($innerIdBin, $worker) {
             self::$chainConnected = true;
+            //成功连上,退避计数复位
+            self::$chainReconnectDelay = 1;
+            self::$chainReconnectErrCount = 0;
             //REG 必须是连上后的第一条
             $connection->send(chr(self::CH_REG) . $innerIdBin);
+            //重连后向 hub 重放本进程持有的全部 bind 状态(hub 在 onClose 时已经把这部分清空)
+            if (!empty($worker->localBindings)) {
+                $replayCnt = 0;
+                foreach ($worker->localBindings as $key => $fds) {
+                    $keyHead = pack('n', strlen($key)) . $key;
+                    foreach (array_keys($fds) as $fdHex) {
+                        $connection->send(chr(self::CH_BIND) . $keyHead . hex2bin($fdHex));
+                        $replayCnt++;
+                    }
+                }
+                if ($replayCnt > 0) {
+                    Worker::safeEcho('chain reconnect: replayed '.$replayCnt.' bindings'.PHP_EOL);
+                }
+            }
             //断线期间暂存的消息补发
             if (self::$chainPending) {
                 foreach (self::$chainPending as $p) {
@@ -513,22 +543,46 @@ class WorkerManSrv extends SrvBase
                 foreach ($worker->connections as $c) {
                     $c->send($raw);
                 }
+            } elseif ($cmd === self::CH_DO_CLOSE) {
+                //[1][4B fdId]
+                if (strlen($data) !== 5) {
+                    return;
+                }
+                $fdId = unpack('N', substr($data, 1, 4))[1];
+                if (isset($worker->connections[$fdId])) {
+                    $worker->connections[$fdId]->close();
+                }
             }
         };
         $conn->onError = function ($connection, $code, $msg) {
             self::$chainConnected = false;
-            Worker::safeEcho('chain err code='.$code.' msg='.$msg.PHP_EOL);
+            //错误日志限流:第 1、2、4、8、16... 次记录,避免每秒一条刷屏
+            self::$chainReconnectErrCount++;
+            if ((self::$chainReconnectErrCount & (self::$chainReconnectErrCount - 1)) === 0) {
+                Worker::safeEcho('chain err code='.$code.' msg='.$msg.' (count='.self::$chainReconnectErrCount.')'.PHP_EOL);
+            }
         };
         $conn->onClose = function (\Workerman\Connection\AsyncTcpConnection $connection) {
             self::$chainConnected = false;
-            //chain 断开 1 秒后重连,重连成功会自动重新 REG 并 flush pending
-            $connection->reConnect(1);
+            //指数退避:1, 2, 4, 8, 16, 30, 30, ...
+            $delay = self::$chainReconnectDelay;
+            self::$chainReconnectDelay = min(self::$chainReconnectDelay * 2, self::$chainReconnectMax);
+            $connection->reConnect($delay);
         };
         self::$ipcConnection = $conn;
         $conn->connect();
     }
 
-    /** 是否需要启用内部通信通道 */
+    /** 是否需要启用内部通信通道
+     *
+     * 决策顺序:
+     * 1. Windows 平台不支持 unix sock,直接关
+     * 2. task_worker_num > 0 → 必开 (task 进程通信依赖 hub)
+     * 3. type=http 且 http_chain_enable 不为真值 → 关
+     *    (HTTP 短连接默认无需 IPC; 需要时显式 setting.http_chain_enable=true 走通用推断)
+     * 4. 通用推断: count > 1 或非空 listen → 开
+     * 5. 否则关
+     */
     protected function needChain(): bool
     {
         if (DIRECTORY_SEPARATOR !== '/') { //for windows
@@ -537,6 +591,12 @@ class WorkerManSrv extends SrvBase
         if ($this->task_worker_num > 0) {
             return true;
         }
+        $httpChain = (bool)$this->getConfig('setting.http_chain_enable', null);
+        //HTTP 短连接默认关; http_chain_enable=true 时绕过此限制走通用推断
+        if (!$httpChain && $this->getConfig('type') === self::TYPE_HTTP) {
+            return false;
+        }
+        //通用推断:多 worker 进程或多 listen 时启用
         if ((int)$this->getConfig('setting.count', 1) > 1) {
             return true;
         }
@@ -641,6 +701,14 @@ class WorkerManSrv extends SrvBase
                         } catch (\Throwable $e) {
                         }
                     }
+                    //新 worker 进程 REG 等同声明"我手上没有任何旧 fd",清掉该 uniqid 名下的 fd 索引
+                    //避免老 worker 留下的 fd 索引永远没人 unbind 的内存泄漏
+                    if (isset($ipcWorker->uniqidFds[$uniqidBin])) {
+                        foreach (array_keys($ipcWorker->uniqidFds[$uniqidBin]) as $fdBin) {
+                            $dropFd($fdBin, null);
+                        }
+                        unset($ipcWorker->uniqidFds[$uniqidBin]);
+                    }
                     $ipcWorker->channels[$uniqidBin] = $connection;
                     $connection->chainUniqid = $uniqidBin;
                     return;
@@ -659,6 +727,22 @@ class WorkerManSrv extends SrvBase
                     $ipcWorker->channels[$uniqidBin]->send(
                         chr(self::CH_DELIVER) . substr($fdBin, 4, 4) . $raw
                     );
+                    return;
+
+                case self::CH_CLOSE: // [1][8B fdBin]
+                    if ($len !== 9) {
+                        return;
+                    }
+                    $fdBin = substr($data, 1, 8);
+                    $uniqidBin = self::fdToUniqid($fdBin);
+                    if (!isset($ipcWorker->channels[$uniqidBin])) {
+                        return;
+                    }
+                    //通知目标 worker 关闭连接 + 同步清理 hub 上该 fd 的所有键绑定
+                    $ipcWorker->channels[$uniqidBin]->send(
+                        chr(self::CH_DO_CLOSE) . substr($fdBin, 4, 4)
+                    );
+                    $dropFd($fdBin, $uniqidBin);
                     return;
 
                 case self::CH_ALL: // [1][raw]
@@ -681,6 +765,7 @@ class WorkerManSrv extends SrvBase
                     $uniqidBin = self::fdToUniqid($fdBin);
                     //目标 worker 未注册时丢弃
                     if (!isset($ipcWorker->channels[$uniqidBin])) {
+                        Worker::safeEcho('CH_BIND drop: worker not registered, key='.$key.PHP_EOL);
                         return;
                     }
                     $ipcWorker->bindings[$key][$fdBin] = 1;
@@ -773,6 +858,40 @@ class WorkerManSrv extends SrvBase
                 unset($ipcWorker->uniqidFds[$uniqidBin]);
             }
         };
+        //周期性 hub 状态输出,便于排查野绑定/泄漏;0 关闭,默认 60s
+        $statInterval = (int)$this->getConfig('setting.chain_stat_interval', 60);
+        if ($statInterval > 0) {
+            $ipcWorker->onWorkerStart = function () use ($ipcWorker, $statInterval) {
+                Timer::add($statInterval, function () use ($ipcWorker) {
+                    $channelCnt = count($ipcWorker->channels);
+                    $bindKeyCnt = count($ipcWorker->bindings);
+                    $fdCnt      = count($ipcWorker->fdKeys);
+                    $totalBind  = 0;
+                    $maxKeyFds  = 0;
+                    $maxKey     = '';
+                    foreach ($ipcWorker->bindings as $k => $fds) {
+                        $c = count($fds);
+                        $totalBind += $c;
+                        if ($c > $maxKeyFds) {
+                            $maxKeyFds = $c;
+                            $maxKey = $k;
+                        }
+                    }
+                    $rssKB = (int)(memory_get_usage(true) / 1024);
+                    $maxKeyDisplay = strlen($maxKey) > 32 ? substr($maxKey, 0, 32).'...' : $maxKey;
+                    Worker::safeEcho(sprintf(
+                        '[chain stat] channels=%d keys=%d fds=%d totalBindings=%d maxKeyFds=%d maxKey=%s rssKB=%d'.PHP_EOL,
+                        $channelCnt,
+                        $bindKeyCnt,
+                        $fdCnt,
+                        $totalBind,
+                        $maxKeyFds,
+                        $maxKeyDisplay !== '' ? var_export($maxKeyDisplay, true) : '-',
+                        $rssKB
+                    ));
+                });
+            };
+        }
         self::$ipcWorker = $ipcWorker;
     }
     /** 通过 chain 通道把数据转发到目标 worker(或群发)
@@ -809,13 +928,45 @@ class WorkerManSrv extends SrvBase
         return false !== self::$ipcConnection->send($payload);
     }
 
+    /** key 最大长度限制(2 字节长度字段的上限,留出余量) */
+    const CH_KEY_MAX_LEN = 65500;
+
+    private static function checkKey(string $key): bool
+    {
+        if ($key === '' || strlen($key) > self::CH_KEY_MAX_LEN) {
+            Worker::safeEcho('chain key invalid len='.strlen($key).PHP_EOL);
+            return false;
+        }
+        return true;
+    }
+
     /** 绑定业务键到连接(跨进程缓存于 chain 服务端内存)
      * 典型用法:登录成功后 $serv->bind('user_'.$uid, $connection)
      * 同一 key 可绑定多个连接(多端登录),sendByKey 将群发到所有绑定
+     * 同步在本进程持有的 worker 上保留副本,断线重连后会自动重放给 hub
+     * 首次 bind 时会自动给 connection 挂上 onClose 钩子,物理断开时清掉所有绑定与本地副本
      */
     public function bind(string $key, TcpConnection $connection): bool
     {
+        if (!self::checkKey($key)) return false;
         $fdHex = self::getUniqId($connection);
+        $worker = $connection->worker;
+        $worker->localBindings[$key][$fdHex] = 1;
+        //自动 onClose 清理:用户漏调 unbindFd 时兜底
+        if (empty($connection->_chainBindHooked)) {
+            $connection->_chainBindHooked = true;
+            $userOnClose = $connection->onClose ?? null;
+            $connection->onClose = function ($conn) use ($userOnClose) {
+                try {
+                    SrvBase::$instance->unbindFd($conn);
+                } catch (\Throwable $e) {
+                    Worker::safeEcho('auto unbindFd failed: '.$e->getMessage().PHP_EOL);
+                }
+                if ($userOnClose) {
+                    call_user_func($userOnClose, $conn);
+                }
+            };
+        }
         return self::ipcRawSend(
             chr(self::CH_BIND) . pack('n', strlen($key)) . $key . hex2bin($fdHex)
         );
@@ -824,29 +975,56 @@ class WorkerManSrv extends SrvBase
     /** 解绑业务键
      * @param string $key
      * @param TcpConnection|null $connection 为 null 时解绑该 key 的全部连接
+     *  注:跨进程语义脆弱——只清空本进程 localBindings,其他进程的本地副本会在重连时再次重放。
+     *  推荐使用 unbind($key, $connection) 精确解绑。
      * @return bool
      */
     public function unbind(string $key, ?TcpConnection $connection = null): bool
     {
+        if (!self::checkKey($key)) return false;
         if ($connection) {
             $fdHex = self::getUniqId($connection);
+            $worker = $connection->worker;
+            if (isset($worker->localBindings[$key][$fdHex])) {
+                unset($worker->localBindings[$key][$fdHex]);
+                if (empty($worker->localBindings[$key])) {
+                    unset($worker->localBindings[$key]);
+                }
+            }
             return self::ipcRawSend(
                 chr(self::CH_UNBIND) . pack('n', strlen($key)) . $key . hex2bin($fdHex)
             );
         }
+        //无 $connection 时只能清本进程副本
+        if (isset($this->server->localBindings[$key])) {
+            unset($this->server->localBindings[$key]);
+        }
         return self::ipcRawSend(chr(self::CH_UNBIND_KEY) . pack('n', strlen($key)) . $key);
     }
 
-    /** 一次性清理某个连接的全部绑定(在用户 onClose 中调用) */
+    /** 一次性清理某个连接的全部绑定
+     * 必须在用户的 onClose 回调里调用,否则 localBindings 会无限累积导致内存泄漏 +
+     * 重连时把陈旧 fd 重放给 hub 形成野绑定。
+     */
     public function unbindFd(TcpConnection $connection): bool
     {
         $fdHex = self::getUniqId($connection);
+        $worker = $connection->worker;
+        foreach ($worker->localBindings as $k => $fds) {
+            if (isset($fds[$fdHex])) {
+                unset($worker->localBindings[$k][$fdHex]);
+                if (empty($worker->localBindings[$k])) {
+                    unset($worker->localBindings[$k]);
+                }
+            }
+        }
         return self::ipcRawSend(chr(self::CH_UNBIND_FD) . hex2bin($fdHex));
     }
 
     /** 按业务键跨进程投递数据 */
     public function sendByKey(string $key, $data): bool
     {
+        if (!self::checkKey($key)) return false;
         return self::ipcRawSend(
             chr(self::CH_SEND_KEY) . pack('n', strlen($key)) . $key . (string)$data
         );
@@ -940,34 +1118,59 @@ class WorkerManSrv extends SrvBase
     /** 向指定连接发送数据
      * @param int|string $fd
      *   - 16 字符全局 hex fd: 可跨进程,由 getUniqId() 生成,send 本地命中直发,否则走 chain 转发
-     *   - -1: 广播到所有进程的所有连接(需要 chain 通道)
+     *   - -1 或 '-1': 广播到所有进程的所有连接(需要 chain 通道)
      *   - int: 当前进程本地连接 id(不具备跨进程能力,仅作后向兼容)
      */
     public function send($fd, $data)
     {
+        //广播
+        if ($fd === -1 || $fd === '-1') {
+            //无 chain 时退化为本进程本地广播
+            if (!self::$ipcConnection) {
+                foreach ($this->server->connections as $c) {
+                    $c->send($data);
+                }
+                return true;
+            }
+            return self::ipcTo($this->server, '-1', $data);
+        }
         //本进程命中直发
         if (is_int($fd)) { //当前进程fd
             $connection = $this->server->connections[$fd] ?? null;
+            return $connection ? false !== $connection->send($data) : false;
         }
-        if ($connection) {
-            return false !== $connection->send($data);
-        }
-        //全局 hex fd 本进程未命中 → chain 转发到持有该连接的 worker
+        //全局 hex fd: 本进程命中直发,否则走 chain 转发到持有该连接的 worker
         if (is_string($fd) && strlen($fd) === 16) {
+            $client = self::uniqIdToClient($fd);
+            if ($client
+                && $client['worker_id'] === $this->server->id
+                && $client['work_port'] === $this->server->port
+                && isset($this->server->connections[$client['fd_id']])
+            ) {
+                return false !== $this->server->connections[$client['fd_id']]->send($data);
+            }
             return self::ipcTo($this->server, $fd, $data);
         }
         return false;
     }
     public function close($fd)
     {
-        //本进程命中直发
+        //本进程命中直接关闭
         if (is_int($fd)) {
             $connection = $this->server->connections[$fd] ?? null;
-            if ($connection) {
-                return $connection->close();
+            return $connection ? (bool)$connection->close() : false;
+        }
+        //全局 hex fd: 本进程命中直接关,否则 chain 转发关闭命令到持有该连接的 worker
+        if (is_string($fd) && strlen($fd) === 16) {
+            $client = self::uniqIdToClient($fd);
+            if ($client
+                && $client['worker_id'] === $this->server->id
+                && $client['work_port'] === $this->server->port
+                && isset($this->server->connections[$client['fd_id']])
+            ) {
+                return (bool)$this->server->connections[$client['fd_id']]->close();
             }
-        } else { //内部通信转发
-            //todo 
+            return self::ipcRawSend(chr(self::CH_CLOSE) . hex2bin($fd));
         }
         return false;
     }

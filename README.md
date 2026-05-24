@@ -65,4 +65,75 @@ http onRequest(Swoole\Http\Request $request, Swoole\Http\Response $response)
 onTask(Swoole\Server $server, int $task_id, int $src_worker_id, mixed $data)  
 `task 进程的 onTask 事件中没有调用 finish 方法或者 return 结果，worker 进程不会触发 onFinish`  
 onFinish(Swoole\Server $server, int $task_id, mixed $data)  
- 
+
+## 跨进程 send / 业务键绑定 (IPC)
+
+**仅 Workerman 适用**。Swoole 的 `$fd` 是 Server 进程内全局唯一的整数，任意 worker 都可直接 `$server->send($fd, $data)` 投递到对端连接，不需要额外的 IPC 通道。
+
+Workerman 没有这套全局 fd 语义：每个 worker 进程独立持有自己的 `connections[$fd]` 表，跨进程发送必须显式通过框架内置的 IPC hub 转发。`WorkerManSrv` 因此提供以下能力，**同名 API 在 SwooleSrv 上不存在或行为完全不同**：
+
+| API | Workerman 行为 | Swoole 等价做法 |
+|---|---|---|
+| `getUniqId(TcpConnection)` | 生成 16 字符 hex 全局 fd（worker_id+port+fd） | 直接用 `$fd` 整数 |
+| `send($globalHexFd, $data)` | 本进程命中直发,否则走 hub 转 CH_TO 给目标 worker | 不需要,`send($fd, $data)` 即可 |
+| `send(-1, $data)` | hub 启用时广播；未启用时退化为本进程 connections 遍历 | 自行 `foreach ($server->connections as $fd) $server->send($fd, ...)` |
+| `close($globalHexFd)` | 走 hub 发 CH_CLOSE | `$server->close($fd)` 即可 |
+| `bind($key, TcpConnection)` | hub 维护 key→fd 映射,跨 worker 可达 | 自行用 redis/共享内存维护 user_id → $fd |
+| `unbind / unbindFd / sendByKey` | 同上 | 同上 |
+
+### 启用条件
+
+是否启动 IPC hub 由 `WorkerManSrv::needChain()` 按以下顺序决定:
+
+1. Windows 平台直接关闭 (无 unix domain socket 支持)。
+2. 配置了 `task_worker_num > 0` → 强制开启 (task 进程通信依赖 hub)。
+3. `type === 'http'` 且 `setting.http_chain_enable` 不为真值 → 关闭。HTTP 是无状态短连接,跨 worker 推送通常无意义,即便 `count > 1` 也不会启用 IPC,避免无谓的 hub 进程开销。
+4. 通用推断: `setting.count > 1` 或非空 `listen` 多端口监听 → 开启。
+5. 都不满足 → 关闭。
+
+> HTTP 服务确实需要跨进程能力时(例如 SSE 推送、HTTP 入口 `bind` 用户/由 task 进程通过 `sendByKey` 反推消息),需要显式 `setting.http_chain_enable = true`,之后再走第 4 条通用推断。
+> `http_chain_enable` 顾名思义仅作用于 HTTP 类型的"绕过开关",对其他长连接型不生效;长连接型由 `count` 或 `listen` 自然驱动。
+
+### 业务侧使用约束
+
+1. **首次 bind 后不要直接覆盖 `$connection->onClose`**：框架在 bind 时会挂自动清理钩子；用户后续赋值会覆盖钩子，导致连接断开后 hub 上残留野绑定。需追加业务清理时，在 onClose 函数体里手动调 `$srv->unbindFd($conn)`。
+2. **单 worker bind 数量建议 < 30k**：重连成功后框架一次性把本地 bindings 全部 BIND 重放给 hub，超过 Workerman 默认 1MB 发送缓冲会触发 onBufferFull。预期超量时在配置里调高 `setting.maxSendBufferSize`（如 10485760）。
+3. **key 长度 ≤ 65500 字节**：协议 keyLen 字段 2 字节，超长会被框架拒绝。
+
+### 相关配置
+
+```php
+'setting' => [
+    'http_chain_enable'    => true,     // HTTP 服务的 IPC 绕过开关,truthy 时让 HTTP 也按 count/listen 推断;非 HTTP 不需配置
+    'chain_pending_max'    => 10000,    // chain 断线期间业务消息缓冲条数,超限丢最早
+    'chain_stat_interval'  => 60,       // hub 状态周期输出秒数,0 关闭
+    'maxSendBufferSize'    => 10485760, // 防 bind 重放风暴,可选
+],
+```
+
+### hub 状态输出（线上排障）
+
+`chain_stat_interval > 0` 时，hub 进程会按周期输出到 stdout：
+
+```
+[chain stat] channels=N keys=K fds=F totalBindings=T maxKeyFds=M maxKey='xxx' rssKB=R
+```
+
+- `channels` 注册的 worker 数；与预期不符 = 有 worker 没接入。
+- `fds` 持续 > 物理在线连接数 = 野绑定累积。
+- `maxKeyFds` 异常飙升 = 某个 key 被循环 bind。
+- `rssKB` 长期上扬 = 内存泄漏信号。
+
+## 升级提示
+
+1. 旧示例中的配置文件名 `wokerman.conf.php` 已更名为 `app.conf.php`；老项目可保持原文件名，仅是示例约定。
+2. 以下 API 已重命名/重构,如有外部引用需同步：
+
+| 旧 | 新 |
+|---|---|
+| `WorkerManSrv::workerToUniqId()` | `workerToInnerId()` |
+| `WorkerManSrv::uniqIdToWorker()` | `innerIdToWorker()` |
+| `WorkerManSrv::chainTo()` | `ipcTo()` |
+| `WorkerManSrv::clientToUniqId($port, $fd)` (12 hex) | `clientToUniqId($wid, $port, $fd)` (16 hex) |
+| `relog()` / `initMyPhp()` / `hasInitMyPhp` | `reLog()` / `initLoadPhp()` / `hasInitLoadPhp` |
+| `WorkerManSrv::$workers` / `$fdConnection` / `$remoteConnection` / `$chainSocketFile` / `$chainWorker` | 已删除,见 `$ipcConnection` / `$ipcSocketFile` / `$ipcWorker` |
