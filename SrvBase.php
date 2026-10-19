@@ -199,8 +199,10 @@ abstract class SrvBase
         set_error_handler(function () {
             return true;
         });
-        \fwrite($stream, $msg);
-        \fflush($stream);
+        if (!feof($stream)) {
+            \fwrite($stream, $msg);
+            \fflush($stream);
+        }
         restore_error_handler();
     }
 
